@@ -411,8 +411,9 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
       'font:12px/1.4 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif',
       'box-shadow:0 2px 8px rgba(0,0,0,.2)', 'white-space:nowrap',
     ].join(';')
+    const created = el
     el.addEventListener('click', () => {
-      if (el.dataset.busy === '1') return
+      if (created.dataset.busy === '1') return
       onToggle()
     })
     // Re-anchor while the layout settles (composer/tab bar render after the

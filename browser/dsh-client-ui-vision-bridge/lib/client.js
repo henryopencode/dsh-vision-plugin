@@ -314,8 +314,9 @@ window.__ModuleLoader__.load({
 					"box-shadow:0 2px 8px rgba(0,0,0,.2)",
 					"white-space:nowrap"
 				].join(";");
+				const created = el;
 				el.addEventListener("click", () => {
-					if (el.dataset.busy === "1") return;
+					if (created.dataset.busy === "1") return;
 					onToggle();
 				});
 				const pill = el;
