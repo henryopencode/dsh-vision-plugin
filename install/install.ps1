@@ -43,6 +43,15 @@ Write-Host "[1/4] Ollama: OK ($($ollama.Source))" -ForegroundColor Green
 $null = Start-Process -FilePath $ollama.Source -ArgumentList 'serve' -WindowStyle Hidden -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
+# 让模型常驻内存（根治"首次识别超时"：冷加载 1-2 分钟，常驻后秒级就绪）
+try {
+    setx OLLAMA_KEEP_ALIVE '-1' | Out-Null
+    Write-Host '  已设置 OLLAMA_KEEP_ALIVE=-1（模型常驻）' -ForegroundColor Green
+    Write-Host '  注意：需重启 Ollama（托盘图标 → Quit → 重新打开）后生效' -ForegroundColor DarkGray
+} catch {
+    Write-Host '  设置 OLLAMA_KEEP_ALIVE 失败（可忽略，不影响使用）' -ForegroundColor DarkGray
+}
+
 # ── 2. 拉取视觉模型 ─────────────────────────────────────────────
 if (-not $SkipModelPull) {
     Write-Host "[2/4] 拉取视觉模型 $Model …（约 2-4 GB，视网速而定）" -ForegroundColor Yellow

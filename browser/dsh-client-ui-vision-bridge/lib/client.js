@@ -4,32 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		//#region lib/types/client/index.js
-		/**
-		* Local vision bridge plugin, browser half: turns pasted images into
-		* recognized text before they reach the host.
-		*
-		* The conversation composer already supports pasting images into the draft
-		* rail (ui-conversation's InputBar paste handler). The problem this plugin
-		* solves is what happens on send: the host refuses image content unless the
-		* routed model declares image input, and a text-only chat model (e.g. the
-		* DeepSeek adapter) rejects image blocks outright. Instead of changing any
-		* host behavior, the browser half intercepts the outgoing `session.prompt`
-		* request, sends each pasted image to a LOCAL Ollama vision model over its
-		* OpenAI-compatible endpoint (image bytes never leave the machine), and
-		* replaces the image parts with their text descriptions before the request
-		* continues to the host. The chat model then sees plain text and answers
-		* normally.
-		*
-		* Patching the global fetch is safe here because `dsh-client-connection`
-		* reads `globalThis.fetch` per call (it never caches a reference), and the
-		* plugin restores the original on dispose so HMR reloads leave no residue.
-		*
-		* Configuration lives in `localStorage` under the key `dsh-vision:config`
-		* (a JSON object; see {@link DEFAULT_CONFIG}); a future settings surface can
-		* own the same values.
-		* @module @deepseek-ai/dsh-client-ui-vision-bridge/client
-		*/
+		//#region src/client/index.ts
 		/** Default bridge configuration; overridable per user via localStorage. */
 		const DEFAULT_CONFIG = {
 			/** Master switch. */
@@ -243,35 +218,33 @@ window.__ModuleLoader__.load({
 			}
 		}
 		/**
-		* Probe the local vision service: reachable? are the configured models
-		* installed? Called before recognition so a dead service or missing model
-		* fails fast with an immediate message instead of a long silent wait.
+		* Probe the local vision service through the same-origin `/vision/probe`
+		* endpoint (server plugin): reachable? models installed? loaded? The probe
+		* also warms the model on the server, so the first recognition usually finds
+		* it already loaded instead of paying a cold-start load inside the request
+		* timeout. Called before recognition so a dead service or missing model fails
+		* fast with an immediate message instead of a long silent wait.
 		* @param originalFetch - the unpatched global fetch.
 		* @param config - effective bridge configuration.
 		* @returns the probe outcome.
 		*/
-		async function probeModels(originalFetch, config) {
+		async function probeModels(originalFetch, _config) {
 			const controller = new AbortController();
-			const timer = setTimeout(() => controller.abort(), 8e3);
+			const timer = setTimeout(() => controller.abort(), 1e4);
 			try {
-				const response = await originalFetch(`${config.baseURL.replace(/\/+$/, "")}/models`, {
+				const response = await originalFetch("/vision/probe", {
 					method: "GET",
 					headers: { Accept: "application/json" },
 					signal: controller.signal
 				});
 				if (!response.ok) return {
 					ok: false,
-					reason: `本地视觉服务 HTTP ${response.status}`
+					reason: `本地识图服务 HTTP ${response.status}`
 				};
 				const payload = await response.json();
-				const known = new Set((payload.data ?? []).map((entry) => entry.id ?? ""));
-				const matches = (name) => known.has(name) || known.has(`${name}:latest`) || known.has(name.split(":")[0]);
-				const missing = [];
-				if (!matches(config.model)) missing.push(config.model);
-				if (config.ocrEnabled && config.ocrModel !== "" && !matches(config.ocrModel)) missing.push(config.ocrModel);
-				if (missing.length > 0) return {
+				if (payload.ok === false) return {
 					ok: false,
-					reason: `模型未安装：${missing.join("、")}（请运行 ollama pull ${missing.join(" 和 ollama pull ")}）`
+					reason: payload.reason ?? "本地识图服务不可用"
 				};
 				return { ok: true };
 			} catch {
@@ -436,7 +409,7 @@ window.__ModuleLoader__.load({
 					if (images.length > config.maxImages) recognized.push(`⚠️ 另有 ${images.length - config.maxImages} 张图片未识别（单条消息最多识别 ${config.maxImages} 张）`);
 					updateStatusIndicator("online", void 0, toggleBridge);
 				} else {
-					recognized.push(`⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。请确认 vision-server 插件已部署、Ollama 已启动。`);
+					recognized.push(`⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。首次识别需加载模型（无 GPU 时可能 1-2 分钟），请重试；若仍失败请确认 Ollama 已启动、vision-server 已部署。`);
 					updateStatusIndicator("offline", void 0, toggleBridge);
 				}
 				const rewritten = [];

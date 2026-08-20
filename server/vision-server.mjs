@@ -124,6 +124,51 @@ export function apply(ctx, config) {
   // to their alt text, which is acceptable for pasted-draft attachments.
   const attachmentRefs = new Map()
 
+  // Models whose warm-up request has been fired (avoid re-firing per probe).
+  const warmed = new Set()
+
+  /** List models the local service serves (OpenAI-compatible listing). */
+  async function listModels(signal) {
+    const response = await fetch(`${baseURL.replace(/\/+$/, '')}/models`, { method: 'GET', headers: { Accept: 'application/json' }, signal })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const payload = await response.json()
+    return (payload?.data ?? []).map((entry) => entry?.id ?? '')
+  }
+
+  /** Whether the model is currently loaded (Ollama /api/ps). */
+  async function modelLoaded(modelName) {
+    try {
+      const base = baseURL.replace(/\/+$/, '').replace(/\/v1$/, '')
+      const response = await fetch(`${base}/api/ps`, { method: 'GET', signal: AbortSignal.timeout(5000) })
+      if (!response.ok) return false
+      const payload = await response.json()
+      return (payload?.models ?? []).some((m) => String(m?.name ?? '').split(':')[0] === modelName.split(':')[0])
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Fire-and-forget warm-up: the first recognition on a cold start pays a
+   * model load (seconds to a minute+ on CPU-only Windows). Kicking the load
+   * off during the pre-send probe means the real request usually finds the
+   * model already loaded. Never awaited; errors are swallowed.
+   */
+  function warmUpModel(modelName) {
+    if (warmed.has(modelName)) return
+    warmed.add(modelName)
+    void fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+    }).catch(() => { /* warm-up is best-effort */ })
+  }
+
   ctx.webServer.register({
     kind: 'prefix',
     path: '/vision',
@@ -133,6 +178,33 @@ export function apply(ctx, config) {
         res.end(JSON.stringify(body))
       }
       const url = (req.url ?? '').split('?')[0]
+
+      // GET /vision/probe — same-origin health check that also warms the
+      // model. Returns which models are installed and whether they are loaded.
+      if (url === '/vision/probe' && req.method === 'GET') {
+        let ok = true
+        let reason
+        let known = []
+        let loaded = false
+        try {
+          known = await listModels(AbortSignal.timeout(8000))
+          loaded = await modelLoaded(model)
+        } catch (error) {
+          ok = false
+          reason = error?.message ?? String(error)
+        }
+        const matches = (name) => known.includes(name) || known.includes(`${name}:latest`) || known.includes(name.split(':')[0])
+        const missing = []
+        if (!matches(model)) missing.push(model)
+        if (ocrEnabled && ocrModel !== '' && !matches(ocrModel)) missing.push(ocrModel)
+        if (missing.length > 0) {
+          ok = false
+          reason = `模型未安装：${missing.join('、')}（请运行 ollama pull ${missing.join(' 和 ollama pull ')}）`
+        }
+        if (ok) warmUpModel(model)
+        respond(200, { ok, reason, loaded })
+        return
+      }
 
       // POST /vision/attach — durably store one pasted image and return its id.
       if (url === '/vision/attach' && req.method === 'POST') {

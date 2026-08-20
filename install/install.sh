@@ -22,6 +22,12 @@ echo "[1/4] Ollama: OK"
 echo "[2/4] 拉取模型 $MODEL …"
 ollama pull "$MODEL"
 
+# 模型常驻（根治首次冷加载超时）；macOS 也可在 Ollama 菜单栏 Settings 勾选
+# "Keep models loaded in memory"
+if command -v launchctl >/dev/null 2>&1; then
+  launchctl setenv OLLAMA_KEEP_ALIVE -1 2>/dev/null && echo "  已设置 OLLAMA_KEEP_ALIVE=-1（重启 Ollama 后生效）"
+fi
+
 # 3. 定位 DSH 用户目录
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 WEB_DIR="$DSH_HOME/profiles/web"

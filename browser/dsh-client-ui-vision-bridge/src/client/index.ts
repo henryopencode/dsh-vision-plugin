@@ -314,41 +314,34 @@ interface ProbeResult {
 }
 
 /**
- * Probe the local vision service: reachable? are the configured models
- * installed? Called before recognition so a dead service or missing model
- * fails fast with an immediate message instead of a long silent wait.
+ * Probe the local vision service through the same-origin `/vision/probe`
+ * endpoint (server plugin): reachable? models installed? loaded? The probe
+ * also warms the model on the server, so the first recognition usually finds
+ * it already loaded instead of paying a cold-start load inside the request
+ * timeout. Called before recognition so a dead service or missing model fails
+ * fast with an immediate message instead of a long silent wait.
  * @param originalFetch - the unpatched global fetch.
  * @param config - effective bridge configuration.
  * @returns the probe outcome.
  */
 async function probeModels(
   originalFetch: typeof fetch,
-  config: BridgeConfig,
+  _config: BridgeConfig,
 ): Promise<ProbeResult> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8_000)
+  const timer = setTimeout(() => controller.abort(), 10_000)
   try {
-    const response = await originalFetch(`${config.baseURL.replace(/\/+$/, '')}/models`, {
+    const response = await originalFetch('/vision/probe', {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     })
     if (!response.ok) {
-      return { ok: false, reason: `本地视觉服务 HTTP ${response.status}` }
+      return { ok: false, reason: `本地识图服务 HTTP ${response.status}` }
     }
-    const payload = await response.json() as { data?: { id?: string }[] }
-    // Ollama lists models with a `:latest` tag suffix; a configured bare name
-    // matches its tagged form too.
-    const known = new Set((payload.data ?? []).map(entry => entry.id ?? ''))
-    const matches = (name: string): boolean =>
-      known.has(name) || known.has(`${name}:latest`) || known.has(name.split(':')[0]!)
-    const missing: string[] = []
-    if (!matches(config.model)) missing.push(config.model)
-    if (config.ocrEnabled && config.ocrModel !== '' && !matches(config.ocrModel)) {
-      missing.push(config.ocrModel)
-    }
-    if (missing.length > 0) {
-      return { ok: false, reason: `模型未安装：${missing.join('、')}（请运行 ollama pull ${missing.join(' 和 ollama pull ')}）` }
+    const payload = await response.json() as { ok?: boolean; reason?: string }
+    if (payload.ok === false) {
+      return { ok: false, reason: payload.reason ?? '本地识图服务不可用' }
     }
     return { ok: true }
   } catch {
@@ -551,7 +544,7 @@ export function apply(ctx: ClientContext): void {
       // of falling back to cross-origin Ollama calls, which hang in embedded
       // WebViews: the message goes out with an explicit note within seconds.
       recognized.push(
-        `⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。请确认 vision-server 插件已部署、Ollama 已启动。`,
+        `⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。首次识别需加载模型（无 GPU 时可能 1-2 分钟），请重试；若仍失败请确认 Ollama 已启动、vision-server 已部署。`,
       )
       updateStatusIndicator('offline', undefined, toggleBridge)
     }
