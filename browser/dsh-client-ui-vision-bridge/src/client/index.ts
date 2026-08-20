@@ -42,11 +42,11 @@ export const DEFAULT_CONFIG = {
   /** Upper bound of images recognized in one message. */
   maxImages: 4,
   /**
-   * Longest edge images are downscaled to before recognition. High-resolution
-   * pastes (screenshots, photos) otherwise exceed the model's default context
-   * window because the vision encoder tiles them into many tokens.
+   * Longest edge images are downscaled to before recognition. 2048 keeps
+   * small text legible (1280 made nicknames like 全能王 unreadable); larger
+   * values risk exceeding the model's 4096-token context window.
    */
-  maxImageEdge: 1280,
+  maxImageEdge: 2048,
   /** Ollama context window requested for the recognition call. */
   numCtx: 32768,
   /** System prompt for the vision model. */

@@ -94,14 +94,19 @@ function cleanOcrText(text) {
   return lines.join('\n')
 }
 
-/** Downscale an image buffer with sharp; returns { data, mediaType }. */
+/** Normalize an image to the recognition size with sharp; returns { data, mediaType }. */
 async function downscale(data, mediaType, maxEdge) {
   let pipeline = sharp(data, { failOn: 'none' })
   const meta = await pipeline.metadata()
   const longest = Math.max(meta.width ?? 0, meta.height ?? 0)
   if (longest === 0) throw new Error('无法读取图片')
-  if (longest <= maxEdge) return { data, mediaType }
-  const scale = maxEdge / longest
+  // Oversized images shrink to maxEdge; mid-size images (>= 1024) are
+  // upscaled to maxEdge so small text stays legible to the vision encoder
+  // (verified: nicknames like 全能王 are misread at 1280 and correct at 2048).
+  // Small images stay untouched — upscaling them only wastes tokens.
+  const target = longest > maxEdge || (longest >= 1024 && longest < maxEdge) ? maxEdge : longest
+  if (target === longest) return { data, mediaType }
+  const scale = target / longest
   const width = Math.max(1, Math.round((meta.width ?? 1) * scale))
   const height = Math.max(1, Math.round((meta.height ?? 1) * scale))
   const resized = await sharp(data, { failOn: 'none' })
@@ -116,7 +121,7 @@ export function apply(ctx, config) {
   const model = config?.model ?? 'qwen3-vl:4b'
   const ocrModel = config?.ocrModel ?? 'deepseek-ocr'
   const ocrEnabled = config?.ocrEnabled ?? false
-  const maxEdge = config?.maxImageEdge ?? 1280
+  const maxEdge = config?.maxImageEdge ?? 2048
   const perImageTimeoutMs = config?.timeoutMs ?? 240_000
 
   // attachmentId -> full ref, so GET /vision/image/<id> can read it back.

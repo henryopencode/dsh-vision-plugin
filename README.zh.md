@@ -108,7 +108,7 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 | `ocrModel` | `deepseek-ocr` | OCR 模型（`''` 关闭） |
 | `ocrEnabled` | `false` | 是否执行 OCR 提取（更慢但文字精确） |
 | `timeoutMs` | `120000` | 单引擎超时 |
-| `maxImageEdge` | `1280` | 上传前压缩边长 |
+| `maxImageEdge` | `2048` | 识别分辨率边长（2048 保证小字可读；1280 会把"全能王"这类昵称认错） |
 | `maxImages` | `4` | 单条消息最多图片数 |
 
 **模型对比**（实测）：

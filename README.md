@@ -108,7 +108,7 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 | `ocrModel` | `deepseek-ocr` | OCR model for precise text (`''` disables) |
 | `ocrEnabled` | `false` | Run the OCR pass (slower, more precise text) |
 | `timeoutMs` | `120000` | Per-engine timeout |
-| `maxImageEdge` | `1280` | Downscale edge before upload |
+| `maxImageEdge` | `2048` | Recognition resolution (2048 keeps small text legible; 1280 misreads names like 全能王) |
 | `maxImages` | `4` | Max images per message |
 
 **Model comparison** (tested):
