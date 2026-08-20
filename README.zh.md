@@ -116,6 +116,16 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 - `qwen3-vl:4b` — 密集小字准确（约 30 秒）
 - `deepseek-ocr` + 视觉模型 — 双引擎：精确文字 + 场景描述
 
+## 为什么不用官方原生多模态（DSH v0.1.0-rc.8）？
+
+rc.8 为 DeepSeek 适配器增加了"可配置的原生图片请求"——但**DeepSeek API 目前拒绝图片内容**（已在 rc.8 实测）：
+
+```
+messages[1]: unknown variant `image_url`, expected `text`
+```
+
+框架层能发送图片，但 DeepSeek 模型接口只接受文本。本插件用本地识别补上这个缺口，在 DeepSeek 推出视觉模型之前一直有价值。
+
 ## 故障排查
 
 | 现象 | 原因 / 解决 |

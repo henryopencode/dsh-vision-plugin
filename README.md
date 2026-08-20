@@ -116,6 +116,20 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 - `qwen3-vl:4b` — accurate on dense small text (~30 s)
 - `deepseek-ocr` + vision model — dual engine: precise OCR text + scene description
 
+## Why not just use native multimodal (DSH v0.1.0-rc.8)?
+
+DSH rc.8 added *configurable native image requests* for the DeepSeek adapter —
+but **the DeepSeek API itself rejects image content today**. Verified on
+rc.8 with a real request:
+
+```
+messages[1]: unknown variant `image_url`, expected `text`
+```
+
+So the framework can send images, but the DeepSeek model endpoint only
+accepts text. This plugin fills exactly that gap with local recognition, and
+stays relevant until DeepSeek ships a vision-capable endpoint.
+
 ## Troubleshooting
 
 | Symptom | Cause / Fix |
