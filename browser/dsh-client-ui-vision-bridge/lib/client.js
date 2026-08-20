@@ -496,9 +496,8 @@ window.__ModuleLoader__.load({
 				const targetImages = images.slice(0, config.maxImages);
 				const started = Date.now();
 				showProgressCard(targetImages, "正在识别…");
+				updateStatusIndicator("busy", void 0, toggleBridge);
 				const stageOf = (stage) => {
-					updateStatusIndicator("busy", stage, toggleBridge);
-					document.getElementById("dsh-vision-progress");
 					const overlay = document.getElementById("dsh-vision-progress-overlay");
 					if (overlay !== null) overlay.textContent = `📷 ${stage}`;
 				};

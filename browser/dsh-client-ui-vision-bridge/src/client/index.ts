@@ -615,12 +615,12 @@ export function apply(ctx: ClientContext): void {
     // downscales and runs the models on the reliable server network stack.
     const started = Date.now()
     showProgressCard(targetImages, '正在识别…')
+    // The pill stays simple ("⏳ 识别中"); stage details live on the
+    // sending progress card only — showing both was redundant.
+    updateStatusIndicator('busy', undefined, toggleBridge)
     const stageOf = (stage: string): void => {
-      updateStatusIndicator('busy', stage, toggleBridge)
-      const card = document.getElementById('dsh-vision-progress')
       const overlay = document.getElementById('dsh-vision-progress-overlay')
       if (overlay !== null) overlay.textContent = `📷 ${stage}`
-      void card
     }
     const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion, stageOf)
     const elapsedSec = Math.round((Date.now() - started) / 1000)
