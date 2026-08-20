@@ -456,6 +456,68 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
 }
 
 /**
+ * Show (or update) a "sending" card above the composer: the first image with
+ * a translucent overlay showing the current recognition stage. Removed when
+ * recognition finishes and the real message appears.
+ * @param images - image parts (first one is previewed).
+ * @param stage - current stage text.
+ */
+function showProgressCard(images: PromptImagePart[], stage: string): void {
+  let card = document.getElementById('dsh-vision-progress')
+  if (card === null) {
+    card = document.createElement('div')
+    card.id = 'dsh-vision-progress'
+    card.style.cssText = [
+      'position:fixed', 'z-index:9997', 'background:rgba(26,26,30,.94)',
+      'border:1px solid rgba(128,128,128,.35)', 'border-radius:12px',
+      'padding:8px', 'box-shadow:0 6px 24px rgba(0,0,0,.35)',
+    ].join(';')
+    const frame = document.createElement('div')
+    frame.style.cssText = [
+      'position:relative', 'width:180px', 'height:135px', 'overflow:hidden',
+      'border-radius:8px',
+    ].join(';')
+    const img = document.createElement('img')
+    img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
+    const first = images.find(image => typeof image.data === 'string' && image.data.length > 0)
+    img.src = first === undefined || first.data === ''
+      ? ''
+      : `data:${first.mediaType ?? 'image/png'};base64,${first.data}`
+    img.alt = '正在识别的图片'
+    const overlay = document.createElement('div')
+    overlay.id = 'dsh-vision-progress-overlay'
+    overlay.style.cssText = [
+      'position:absolute', 'inset:0', 'background:rgba(0,0,0,.55)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'color:#fff', 'font:13px/1.6 -apple-system,"PingFang SC",sans-serif',
+      'text-align:center', 'padding:10px',
+    ].join(';')
+    frame.append(img, overlay)
+    card.append(frame)
+    document.body.appendChild(card)
+  }
+  const overlay = document.getElementById('dsh-vision-progress-overlay')
+  if (overlay !== null) overlay.textContent = `📷 ${stage}`
+  // Anchor above the composer card, centered.
+  const composer = document.querySelector('[data-composer-card]')
+  if (composer !== null) {
+    const rect = composer.getBoundingClientRect()
+    card.style.left = `${rect.left + rect.width / 2 - 98}px`
+    card.style.top = `${Math.max(4, rect.top - 165)}px`
+  } else {
+    card.style.left = '50%'
+    card.style.top = 'auto'
+    card.style.bottom = '96px'
+    card.style.transform = 'translateX(-50%)'
+  }
+}
+
+/** Remove the "sending" progress card. */
+function removeProgressCard(): void {
+  document.getElementById('dsh-vision-progress')?.remove()
+}
+
+/**
  * Browser half: install the fetch interception for the plugin lifetime.
  * @param ctx - client root context.
  */
@@ -552,11 +614,17 @@ export function apply(ctx: ClientContext): void {
     // Preferred path: one same-origin call to the vision-server plugin, which
     // downscales and runs the models on the reliable server network stack.
     const started = Date.now()
+    showProgressCard(targetImages, '正在识别…')
     const stageOf = (stage: string): void => {
       updateStatusIndicator('busy', stage, toggleBridge)
+      const card = document.getElementById('dsh-vision-progress')
+      const overlay = document.getElementById('dsh-vision-progress-overlay')
+      if (overlay !== null) overlay.textContent = `📷 ${stage}`
+      void card
     }
     const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion, stageOf)
     const elapsedSec = Math.round((Date.now() - started) / 1000)
+    removeProgressCard()
     if (serverResults !== undefined) {
       for (const result of serverResults.results) {
         let text = `【画面】\n${result.scene}`
