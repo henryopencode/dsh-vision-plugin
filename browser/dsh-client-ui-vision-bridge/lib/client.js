@@ -4,32 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		//#region lib/types/client/index.js
-		/**
-		* Local vision bridge plugin, browser half: turns pasted images into
-		* recognized text before they reach the host.
-		*
-		* The conversation composer already supports pasting images into the draft
-		* rail (ui-conversation's InputBar paste handler). The problem this plugin
-		* solves is what happens on send: the host refuses image content unless the
-		* routed model declares image input, and a text-only chat model (e.g. the
-		* DeepSeek adapter) rejects image blocks outright. Instead of changing any
-		* host behavior, the browser half intercepts the outgoing `session.prompt`
-		* request, sends each pasted image to a LOCAL Ollama vision model over its
-		* OpenAI-compatible endpoint (image bytes never leave the machine), and
-		* replaces the image parts with their text descriptions before the request
-		* continues to the host. The chat model then sees plain text and answers
-		* normally.
-		*
-		* Patching the global fetch is safe here because `dsh-client-connection`
-		* reads `globalThis.fetch` per call (it never caches a reference), and the
-		* plugin restores the original on dispose so HMR reloads leave no residue.
-		*
-		* Configuration lives in `localStorage` under the key `dsh-vision:config`
-		* (a JSON object; see {@link DEFAULT_CONFIG}); a future settings surface can
-		* own the same values.
-		* @module @deepseek-ai/dsh-client-ui-vision-bridge/client
-		*/
+		//#region src/client/index.ts
 		/** Default bridge configuration; overridable per user via localStorage. */
 		const DEFAULT_CONFIG = {
 			/** Master switch. */
@@ -178,7 +153,7 @@ window.__ModuleLoader__.load({
 		* @param question - the user's question, when provided.
 		* @returns per-image results, or undefined when the endpoint is missing.
 		*/
-		async function recognizeViaServer(originalFetch, config, images, question) {
+		async function recognizeViaServer(originalFetch, config, images, question, onStage) {
 			const controller = new AbortController();
 			let timer;
 			try {
@@ -193,6 +168,7 @@ window.__ModuleLoader__.load({
 						});
 						continue;
 					}
+					onStage?.("压缩图片…");
 					try {
 						const downscaled = await downscaleImage(data, mediaType, config.maxImageEdge);
 						prepared.push({
@@ -212,6 +188,7 @@ window.__ModuleLoader__.load({
 					}
 				}
 				timer = setTimeout(() => controller.abort(), recognitionRequestTimeoutMs(config, prepared.length));
+				onStage?.(config.ocrEnabled && config.ocrModel !== "" ? "画面分析 + 文字提取…" : "画面分析…");
 				const response = await originalFetch("/vision/recognize", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
@@ -344,7 +321,31 @@ window.__ModuleLoader__.load({
 				el.dataset.ticker = String(ticker);
 				document.body.appendChild(el);
 			}
-			el.textContent = `${state === "online" ? "🟢" : state === "busy" ? "⏳" : state === "disabled" ? "⚪" : "🔴"} ${state === "online" ? "识图就绪" : state === "busy" ? "识别中" : state === "disabled" ? "识图已关闭（点击开启）" : "识图不可用"}${detail === void 0 ? "" : ` · ${detail}`}`;
+			const dot = state === "online" ? "🟢" : state === "busy" ? "⏳" : state === "disabled" ? "⚪" : "🔴";
+			const label = state === "online" ? "识图就绪" : state === "busy" ? "识别中" : state === "disabled" ? "识图已关闭（点击开启）" : "识图不可用";
+			if (state === "busy") {
+				if (el.dataset.ellipsis === void 0) {
+					el.dataset.ellipsis = "0";
+					el.dataset.ellipsisTimer = String(window.setInterval(() => {
+						const pill = document.getElementById("dsh-vision-indicator");
+						if (pill === null || pill.dataset.ellipsis === void 0) return;
+						const dots = (Number(pill.dataset.ellipsis) + 1) % 4;
+						pill.dataset.ellipsis = String(dots);
+						const detail = pill.dataset.detail ?? "";
+						pill.textContent = `${dot} ${label}${".".repeat(dots)}${detail === "" ? "" : ` · ${detail}`}`;
+					}, 450));
+				}
+				el.dataset.detail = detail ?? "";
+				el.textContent = `${dot} ${label}${detail === void 0 ? "" : ` · ${detail}`}`;
+			} else {
+				if (el.dataset.ellipsisTimer !== void 0) {
+					window.clearInterval(Number(el.dataset.ellipsisTimer));
+					delete el.dataset.ellipsis;
+					delete el.dataset.ellipsisTimer;
+					delete el.dataset.detail;
+				}
+				el.textContent = `${dot} ${label}${detail === void 0 ? "" : ` · ${detail}`}`;
+			}
 			positionIndicator(el);
 		}
 		/**
@@ -424,7 +425,10 @@ window.__ModuleLoader__.load({
 				const recognized = [];
 				const targetImages = images.slice(0, config.maxImages);
 				const started = Date.now();
-				const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion);
+				const stageOf = (stage) => {
+					updateStatusIndicator("busy", stage, toggleBridge);
+				};
+				const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion, stageOf);
 				const elapsedSec = Math.round((Date.now() - started) / 1e3);
 				if (serverResults !== void 0) {
 					for (const result of serverResults.results) {
@@ -433,7 +437,10 @@ window.__ModuleLoader__.load({
 						recognized.push(text);
 					}
 					if (images.length > config.maxImages) recognized.push(`⚠️ 另有 ${images.length - config.maxImages} 张图片未识别（单条消息最多识别 ${config.maxImages} 张）`);
-					updateStatusIndicator("online", void 0, toggleBridge);
+					updateStatusIndicator("online", `完成 ${elapsedSec}s`, toggleBridge);
+					window.setTimeout(() => {
+						updateStatusIndicator("online", void 0, toggleBridge);
+					}, 2500);
 				} else {
 					recognized.push(`⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。首次识别需加载模型（无 GPU 时可能 1-2 分钟），请重试；若仍失败请确认 Ollama 已启动、vision-server 已部署。`);
 					updateStatusIndicator("offline", void 0, toggleBridge);

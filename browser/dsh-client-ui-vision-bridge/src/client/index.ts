@@ -235,6 +235,7 @@ async function recognizeViaServer(
   config: BridgeConfig,
   images: PromptImagePart[],
   question: string | undefined,
+  onStage: ((stage: string) => void) | undefined,
 ): Promise<ServerRecognizeOutcome | undefined> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -252,6 +253,7 @@ async function recognizeViaServer(
         prepared.push({ data: '', mediaType })
         continue
       }
+      onStage?.('压缩图片…')
       try {
         const downscaled = await downscaleImage(data, mediaType, config.maxImageEdge)
         prepared.push({ data: downscaled.data, mediaType: downscaled.mediaType })
@@ -268,6 +270,7 @@ async function recognizeViaServer(
       }
     }
     timer = setTimeout(() => controller.abort(), recognitionRequestTimeoutMs(config, prepared.length))
+    onStage?.(config.ocrEnabled && config.ocrModel !== '' ? '画面分析 + 文字提取…' : '画面分析…')
     const response = await originalFetch('/vision/recognize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -425,7 +428,30 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
     : state === 'busy' ? '识别中'
       : state === 'disabled' ? '识图已关闭（点击开启）'
         : '识图不可用'
-  el.textContent = `${dot} ${label}${detail === undefined ? '' : ` · ${detail}`}`
+  // Animated ellipsis while busy: "识别中" → "识别中." → "识别中.." → …
+  if (state === 'busy') {
+    if (el.dataset.ellipsis === undefined) {
+      el.dataset.ellipsis = '0'
+      el.dataset.ellipsisTimer = String(window.setInterval(() => {
+        const pill = document.getElementById('dsh-vision-indicator')
+        if (pill === null || pill.dataset.ellipsis === undefined) return
+        const dots = (Number(pill.dataset.ellipsis) + 1) % 4
+        pill.dataset.ellipsis = String(dots)
+        const detail = pill.dataset.detail ?? ''
+        pill.textContent = `${dot} ${label}${'.'.repeat(dots)}${detail === '' ? '' : ` · ${detail}`}`
+      }, 450))
+    }
+    el.dataset.detail = detail ?? ''
+    el.textContent = `${dot} ${label}${detail === undefined ? '' : ` · ${detail}`}`
+  } else {
+    if (el.dataset.ellipsisTimer !== undefined) {
+      window.clearInterval(Number(el.dataset.ellipsisTimer))
+      delete el.dataset.ellipsis
+      delete el.dataset.ellipsisTimer
+      delete el.dataset.detail
+    }
+    el.textContent = `${dot} ${label}${detail === undefined ? '' : ` · ${detail}`}`
+  }
   positionIndicator(el)
 }
 
@@ -526,7 +552,10 @@ export function apply(ctx: ClientContext): void {
     // Preferred path: one same-origin call to the vision-server plugin, which
     // downscales and runs the models on the reliable server network stack.
     const started = Date.now()
-    const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion)
+    const stageOf = (stage: string): void => {
+      updateStatusIndicator('busy', stage, toggleBridge)
+    }
+    const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion, stageOf)
     const elapsedSec = Math.round((Date.now() - started) / 1000)
     if (serverResults !== undefined) {
       for (const result of serverResults.results) {
@@ -539,7 +568,11 @@ export function apply(ctx: ClientContext): void {
       if (images.length > config.maxImages) {
         recognized.push(`⚠️ 另有 ${images.length - config.maxImages} 张图片未识别（单条消息最多识别 ${config.maxImages} 张）`)
       }
-      updateStatusIndicator('online', undefined, toggleBridge)
+      // "✅ 完成 13s" briefly, then back to ready.
+      updateStatusIndicator('online', `完成 ${elapsedSec}s`, toggleBridge)
+      window.setTimeout(() => {
+        updateStatusIndicator('online', undefined, toggleBridge)
+      }, 2500)
     } else {
       // The same-origin endpoint is absent or unreachable. Fail fast instead
       // of falling back to cross-origin Ollama calls, which hang in embedded
