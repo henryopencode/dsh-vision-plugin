@@ -1,0 +1,19 @@
+{
+  "name": "dsh-vision-plugin",
+  "version": "1.0.0",
+  "description": "Paste-to-recognize images in DeepSeek Harness using a local Ollama vision model (Windows / macOS / Linux)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/henryopencode/dsh-vision-plugin.git"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "vision",
+    "ollama",
+    "ocr",
+    "image-recognition",
+    "plugin"
+  ]
+}
