@@ -287,10 +287,12 @@ window.__ModuleLoader__.load({
 			el.style.transform = "translateX(-50%)";
 		}
 		/**
-		* Update (or create) the status pill over the middle content column.
-		* Clicking the pill toggles the whole bridge.
+		* Update (or create) the status pill over the middle content column: it only
+		* reflects readiness (ready / unavailable / disabled) and doubles as the
+		* bridge switch. While recognition runs it keeps showing "识图就绪" and
+		* clicks are ignored — stage progress lives on the sending card instead.
 		* @param state - the state to show.
-		* @param detail - optional detail text (e.g. the recognition stage).
+		* @param detail - optional detail text.
 		* @param onToggle - callback for a click (toggle the bridge).
 		*/
 		function updateStatusIndicator(state, detail, onToggle) {
@@ -312,7 +314,10 @@ window.__ModuleLoader__.load({
 					"box-shadow:0 2px 8px rgba(0,0,0,.2)",
 					"white-space:nowrap"
 				].join(";");
-				el.addEventListener("click", onToggle);
+				el.addEventListener("click", () => {
+					if (el.dataset.busy === "1") return;
+					onToggle();
+				});
 				const pill = el;
 				const reposition = () => positionIndicator(pill);
 				window.addEventListener("scroll", reposition, { passive: true });
@@ -321,30 +326,12 @@ window.__ModuleLoader__.load({
 				el.dataset.ticker = String(ticker);
 				document.body.appendChild(el);
 			}
-			const dot = state === "online" ? "🟢" : state === "busy" ? "⏳" : state === "disabled" ? "⚪" : "🔴";
-			const label = state === "online" ? "识图就绪" : state === "busy" ? "识别中" : state === "disabled" ? "识图已关闭（点击开启）" : "识图不可用";
 			if (state === "busy") {
-				if (el.dataset.ellipsis === void 0) {
-					el.dataset.ellipsis = "0";
-					el.dataset.ellipsisTimer = String(window.setInterval(() => {
-						const pill = document.getElementById("dsh-vision-indicator");
-						if (pill === null || pill.dataset.ellipsis === void 0) return;
-						const dots = (Number(pill.dataset.ellipsis) + 1) % 4;
-						pill.dataset.ellipsis = String(dots);
-						const detail = pill.dataset.detail ?? "";
-						pill.textContent = `${dot} ${label}${".".repeat(dots)}${detail === "" ? "" : ` · ${detail}`}`;
-					}, 450));
-				}
-				el.dataset.detail = detail ?? "";
-				el.textContent = `${dot} ${label}${detail === void 0 ? "" : ` · ${detail}`}`;
+				el.dataset.busy = "1";
+				el.textContent = "🟢 识图就绪";
 			} else {
-				if (el.dataset.ellipsisTimer !== void 0) {
-					window.clearInterval(Number(el.dataset.ellipsisTimer));
-					delete el.dataset.ellipsis;
-					delete el.dataset.ellipsisTimer;
-					delete el.dataset.detail;
-				}
-				el.textContent = `${dot} ${label}${detail === void 0 ? "" : ` · ${detail}`}`;
+				delete el.dataset.busy;
+				el.textContent = `${state === "online" ? "🟢" : state === "disabled" ? "⚪" : "🔴"} ${state === "online" ? "识图就绪" : state === "disabled" ? "识图已关闭（点击开启）" : "识图不可用"}${detail === void 0 ? "" : ` · ${detail}`}`;
 			}
 			positionIndicator(el);
 		}
