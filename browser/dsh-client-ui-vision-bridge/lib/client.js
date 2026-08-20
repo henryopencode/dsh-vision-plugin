@@ -4,7 +4,32 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		//#region src/client/index.ts
+		//#region lib/types/client/index.js
+		/**
+		* Local vision bridge plugin, browser half: turns pasted images into
+		* recognized text before they reach the host.
+		*
+		* The conversation composer already supports pasting images into the draft
+		* rail (ui-conversation's InputBar paste handler). The problem this plugin
+		* solves is what happens on send: the host refuses image content unless the
+		* routed model declares image input, and a text-only chat model (e.g. the
+		* DeepSeek adapter) rejects image blocks outright. Instead of changing any
+		* host behavior, the browser half intercepts the outgoing `session.prompt`
+		* request, sends each pasted image to a LOCAL Ollama vision model over its
+		* OpenAI-compatible endpoint (image bytes never leave the machine), and
+		* replaces the image parts with their text descriptions before the request
+		* continues to the host. The chat model then sees plain text and answers
+		* normally.
+		*
+		* Patching the global fetch is safe here because `dsh-client-connection`
+		* reads `globalThis.fetch` per call (it never caches a reference), and the
+		* plugin restores the original on dispose so HMR reloads leave no residue.
+		*
+		* Configuration lives in `localStorage` under the key `dsh-vision:config`
+		* (a JSON object; see {@link DEFAULT_CONFIG}); a future settings surface can
+		* own the same values.
+		* @module @deepseek-ai/dsh-client-ui-vision-bridge/client
+		*/
 		/** Default bridge configuration; overridable per user via localStorage. */
 		const DEFAULT_CONFIG = {
 			/** Master switch. */
@@ -311,7 +336,8 @@ window.__ModuleLoader__.load({
 					"white-space:nowrap"
 				].join(";");
 				el.addEventListener("click", onToggle);
-				const reposition = () => positionIndicator(el);
+				const pill = el;
+				const reposition = () => positionIndicator(pill);
 				window.addEventListener("scroll", reposition, { passive: true });
 				window.addEventListener("resize", reposition, { passive: true });
 				const ticker = window.setInterval(reposition, 800);
@@ -371,7 +397,8 @@ window.__ModuleLoader__.load({
 				}
 				if (envelope.type !== "client-request" || envelope.method !== "session.prompt") return originalFetch(input, init);
 				const payload = envelope.payload;
-				const content = payload?.content;
+				if (payload === void 0) return originalFetch(input, init);
+				const content = payload.content;
 				if (!Array.isArray(content)) return originalFetch(input, init);
 				const images = content.filter(isImagePart);
 				if (images.length === 0) return originalFetch(input, init);
@@ -400,8 +427,7 @@ window.__ModuleLoader__.load({
 				const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion);
 				const elapsedSec = Math.round((Date.now() - started) / 1e3);
 				if (serverResults !== void 0) {
-					for (let index = 0; index < serverResults.results.length; index += 1) {
-						const result = serverResults.results[index];
+					for (const result of serverResults.results) {
 						let text = `【画面】\n${result.scene}`;
 						if (result.text !== void 0 && result.text.length > 0) text += `\n\n【文字】\n${result.text}`;
 						recognized.push(text);

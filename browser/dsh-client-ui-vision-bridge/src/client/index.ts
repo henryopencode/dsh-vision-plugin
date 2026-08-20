@@ -409,7 +409,8 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
     el.addEventListener('click', onToggle)
     // Re-anchor while the layout settles (composer/tab bar render after the
     // app mounts) and on scroll/resize.
-    const reposition = (): void => positionIndicator(el!)
+    const pill = el
+    const reposition = (): void => positionIndicator(pill)
     window.addEventListener('scroll', reposition, { passive: true })
     window.addEventListener('resize', reposition, { passive: true })
     const ticker = window.setInterval(reposition, 800)
@@ -418,12 +419,12 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
   }
   const dot = state === 'online' ? '🟢'
     : state === 'busy' ? '⏳'
-    : state === 'disabled' ? '⚪'
-    : '🔴'
+      : state === 'disabled' ? '⚪'
+        : '🔴'
   const label = state === 'online' ? '识图就绪'
     : state === 'busy' ? '识别中'
-    : state === 'disabled' ? '识图已关闭（点击开启）'
-    : '识图不可用'
+      : state === 'disabled' ? '识图已关闭（点击开启）'
+        : '识图不可用'
   el.textContent = `${dot} ${label}${detail === undefined ? '' : ` · ${detail}`}`
   positionIndicator(el)
 }
@@ -472,8 +473,8 @@ export function apply(ctx: ClientContext): void {
     // Only POST session.prompt requests carry user image content.
     const requestUrl = typeof input === 'string' ? input
       : input instanceof URL ? input.href
-      : input instanceof Request ? input.url
-      : String(input)
+        : input instanceof Request ? input.url
+          : String(input)
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
     if (method !== 'POST') return originalFetch(input, init)
     let pathname: string
@@ -496,7 +497,8 @@ export function apply(ctx: ClientContext): void {
       return originalFetch(input, init)
     }
     const payload = envelope.payload
-    const content = payload?.content
+    if (payload === undefined) return originalFetch(input, init)
+    const content = payload.content
     if (!Array.isArray(content)) return originalFetch(input, init)
     const images = content.filter(isImagePart)
     if (images.length === 0) return originalFetch(input, init)
@@ -511,7 +513,7 @@ export function apply(ctx: ClientContext): void {
     if (!probe.ok) {
       updateStatusIndicator('offline', undefined, toggleBridge)
       const note = `【📷 识图不可用】${probe.reason ?? ''}`
-      payload!.content = texts.trim().length > 0
+      payload.content = texts.trim().length > 0
         ? [{ type: 'text', text: `${texts.trim()}\n\n${note}` }]
         : [{ type: 'text', text: note }]
       return originalFetch(input, { ...init, body: JSON.stringify(envelope) })
@@ -527,8 +529,7 @@ export function apply(ctx: ClientContext): void {
     const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion)
     const elapsedSec = Math.round((Date.now() - started) / 1000)
     if (serverResults !== undefined) {
-      for (let index = 0; index < serverResults.results.length; index += 1) {
-        const result = serverResults.results[index]!
+      for (const result of serverResults.results) {
         let text = `【画面】\n${result.scene}`
         if (result.text !== undefined && result.text.length > 0) {
           text += `\n\n【文字】\n${result.text}`
@@ -574,7 +575,7 @@ export function apply(ctx: ClientContext): void {
         text: '（以上是图片识别结果。请结合用户的问题和识别结果，直接回答用户的问题。）',
       })
     }
-    payload!.content = rewritten
+    payload.content = rewritten
 
     return originalFetch(input, { ...init, body: JSON.stringify(envelope) })
   }

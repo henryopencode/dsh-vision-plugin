@@ -239,38 +239,31 @@ async function recognizeViaServer(originalFetch, config, images, question) {
     }
 }
 /**
- * Probe the local vision service: reachable? are the configured models
- * installed? Called before recognition so a dead service or missing model
- * fails fast with an immediate message instead of a long silent wait.
+ * Probe the local vision service through the same-origin `/vision/probe`
+ * endpoint (server plugin): reachable? models installed? loaded? The probe
+ * also warms the model on the server, so the first recognition usually finds
+ * it already loaded instead of paying a cold-start load inside the request
+ * timeout. Called before recognition so a dead service or missing model fails
+ * fast with an immediate message instead of a long silent wait.
  * @param originalFetch - the unpatched global fetch.
  * @param config - effective bridge configuration.
  * @returns the probe outcome.
  */
-async function probeModels(originalFetch, config) {
+async function probeModels(originalFetch, _config) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8_000);
+    const timer = setTimeout(() => controller.abort(), 10_000);
     try {
-        const response = await originalFetch(`${config.baseURL.replace(/\/+$/, '')}/models`, {
+        const response = await originalFetch('/vision/probe', {
             method: 'GET',
             headers: { Accept: 'application/json' },
             signal: controller.signal,
         });
         if (!response.ok) {
-            return { ok: false, reason: `本地视觉服务 HTTP ${response.status}` };
+            return { ok: false, reason: `本地识图服务 HTTP ${response.status}` };
         }
         const payload = await response.json();
-        // Ollama lists models with a `:latest` tag suffix; a configured bare name
-        // matches its tagged form too.
-        const known = new Set((payload.data ?? []).map(entry => entry.id ?? ''));
-        const matches = (name) => known.has(name) || known.has(`${name}:latest`) || known.has(name.split(':')[0]);
-        const missing = [];
-        if (!matches(config.model))
-            missing.push(config.model);
-        if (config.ocrEnabled && config.ocrModel !== '' && !matches(config.ocrModel)) {
-            missing.push(config.ocrModel);
-        }
-        if (missing.length > 0) {
-            return { ok: false, reason: `模型未安装：${missing.join('、')}（请运行 ollama pull ${missing.join(' 和 ollama pull ')}）` };
+        if (payload.ok === false) {
+            return { ok: false, reason: payload.reason ?? '本地识图服务不可用' };
         }
         return { ok: true };
     }
@@ -335,7 +328,8 @@ function updateStatusIndicator(state, detail, onToggle) {
         el.addEventListener('click', onToggle);
         // Re-anchor while the layout settles (composer/tab bar render after the
         // app mounts) and on scroll/resize.
-        const reposition = () => positionIndicator(el);
+        const pill = el;
+        const reposition = () => positionIndicator(pill);
         window.addEventListener('scroll', reposition, { passive: true });
         window.addEventListener('resize', reposition, { passive: true });
         const ticker = window.setInterval(reposition, 800);
@@ -426,7 +420,9 @@ export function apply(ctx) {
             return originalFetch(input, init);
         }
         const payload = envelope.payload;
-        const content = payload?.content;
+        if (payload === undefined)
+            return originalFetch(input, init);
+        const content = payload.content;
         if (!Array.isArray(content))
             return originalFetch(input, init);
         const images = content.filter(isImagePart);
@@ -455,8 +451,7 @@ export function apply(ctx) {
         const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion);
         const elapsedSec = Math.round((Date.now() - started) / 1000);
         if (serverResults !== undefined) {
-            for (let index = 0; index < serverResults.results.length; index += 1) {
-                const result = serverResults.results[index];
+            for (const result of serverResults.results) {
                 let text = `【画面】\n${result.scene}`;
                 if (result.text !== undefined && result.text.length > 0) {
                     text += `\n\n【文字】\n${result.text}`;
@@ -472,7 +467,7 @@ export function apply(ctx) {
             // The same-origin endpoint is absent or unreachable. Fail fast instead
             // of falling back to cross-origin Ollama calls, which hang in embedded
             // WebViews: the message goes out with an explicit note within seconds.
-            recognized.push(`⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。请确认 vision-server 插件已部署、Ollama 已启动。`);
+            recognized.push(`⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。首次识别需加载模型（无 GPU 时可能 1-2 分钟），请重试；若仍失败请确认 Ollama 已启动、vision-server 已部署。`);
             updateStatusIndicator('offline', undefined, toggleBridge);
         }
         // The user's own text comes first (normal message shape); the recognition
