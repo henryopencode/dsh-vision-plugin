@@ -46,7 +46,7 @@ function readBody(req) {
 }
 
 /** One chat-completion call against the local OpenAI-compatible endpoint. */
-async function chatCompletion(baseURL, model, messages, maxTokens, signal, keepAlive) {
+async function chatCompletion(baseURL, model, messages, maxTokens, signal) {
   const response = await fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -57,7 +57,6 @@ async function chatCompletion(baseURL, model, messages, maxTokens, signal, keepA
       messages,
       max_tokens: maxTokens,
       stream: false,
-      keep_alive: keepAlive,
     }),
     signal,
   })
@@ -124,9 +123,6 @@ export function apply(ctx, config) {
   const ocrEnabled = config?.ocrEnabled ?? false
   const maxEdge = config?.maxImageEdge ?? 2048
   const perImageTimeoutMs = config?.timeoutMs ?? 240_000
-  // -1 keeps the model resident after recognition, so the next image skips the
-  // cold load (the "first one times out, second one works" symptom).
-  const keepAlive = config?.keepAlive ?? -1
 
   // attachmentId -> full ref, so GET /vision/image/<id> can read it back.
   // In-memory: refs vanish on restart, and old message image links degrade
@@ -334,36 +330,55 @@ export function apply(ctx, config) {
           }
           attachmentIds.push(attachmentId)
 
-          const downscaled = await downscale(buffer, mediaType, maxEdge)
-          const dataUrl = `data:${downscaled.mediaType};base64,${downscaled.data.toString('base64')}`
-
+          // Downscale ladder: 2048px keeps small text legible, but some
+          // aspect ratios push past the model's 4096-token window — fall back
+          // to smaller edges when the endpoint reports a context overflow.
+          const edgeLadder = [maxEdge, 1536, 1024, 768]
           const controller = new AbortController()
           const timer = setTimeout(() => controller.abort(), recognitionTimeout)
           try {
-            // Scene answer from the vision model.
-            const scene = await chatCompletion(baseURL, activeModel, [
-              { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: questionPrompt },
-                  { type: 'image_url', image_url: { url: dataUrl } },
-                ],
-              },
-            ], 1500, controller.signal, keepAlive)
+            let scene
             let text
-            if (useOcr) {
-              const raw = await chatCompletion(baseURL, ocrModel, [
-                {
-                  role: 'user',
-                  content: [
-                    { type: 'text', text: DEFAULT_OCR_PROMPT },
-                    { type: 'image_url', image_url: { url: dataUrl } },
-                  ],
-                },
-              ], 2000, controller.signal, keepAlive)
-              const cleaned = cleanOcrText(raw)
-              text = cleaned.length > 0 ? cleaned : undefined
+            let lastError
+            for (const edge of edgeLadder) {
+              try {
+                const downscaled = await downscale(buffer, mediaType, edge)
+                const dataUrl = `data:${downscaled.mediaType};base64,${downscaled.data.toString('base64')}`
+                scene = await chatCompletion(baseURL, activeModel, [
+                  { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
+                  {
+                    role: 'user',
+                    content: [
+                      { type: 'text', text: questionPrompt },
+                      { type: 'image_url', image_url: { url: dataUrl } },
+                    ],
+                  },
+                ], 1500, controller.signal)
+                if (useOcr) {
+                  const raw = await chatCompletion(baseURL, ocrModel, [
+                    {
+                      role: 'user',
+                      content: [
+                        { type: 'text', text: DEFAULT_OCR_PROMPT },
+                        { type: 'image_url', image_url: { url: dataUrl } },
+                      ],
+                    },
+                  ], 2000, controller.signal)
+                  const cleaned = cleanOcrText(raw)
+                  text = cleaned.length > 0 ? cleaned : undefined
+                }
+                break
+              } catch (error) {
+                const message = String(error?.message ?? '')
+                if (message.includes('exceeds the available context size') || message.includes('返回为空')) {
+                  lastError = error
+                  continue
+                }
+                throw error
+              }
+            }
+            if (scene === undefined) {
+              throw lastError ?? new Error('识别失败')
             }
             results.push(text === undefined ? { scene } : { scene, text })
           } catch (error) {
