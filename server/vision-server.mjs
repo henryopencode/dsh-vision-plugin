@@ -123,7 +123,11 @@ function cleanOcrText(text) {
 
 /** Normalize an image to the recognition size with sharp; returns { data, mediaType }. */
 async function downscale(data, mediaType, maxEdge) {
-  let pipeline = sharp(data, { failOn: 'none' })
+  // autoOrient(): phone photos carry EXIF orientation (rotate 90/270°).
+  // Without applying it the pixels are interpreted upright-unrotated, which
+  // for portrait shots renders the content outside the canvas — models then
+  // report a "blank/white" image. This fixes that before any resize.
+  let pipeline = sharp(data, { failOn: 'none' }).autoOrient()
   const meta = await pipeline.metadata()
   const longest = Math.max(meta.width ?? 0, meta.height ?? 0)
   if (longest === 0) throw new Error('无法读取图片')
@@ -132,11 +136,17 @@ async function downscale(data, mediaType, maxEdge) {
   // (verified: nicknames like 全能王 are misread at 1280 and correct at 2048).
   // Small images stay untouched — upscaling them only wastes tokens.
   const target = longest > maxEdge || (longest >= 1024 && longest < maxEdge) ? maxEdge : longest
-  if (target === longest) return { data, mediaType }
+  // Always re-encode through autoOrient: even when the size is unchanged, the
+  // EXIF rotation must be baked into the pixels (else portrait phone shots
+  // render blank for the model). Only skip when the source has no EXIF
+  // orientation to apply AND is a JPEG/PNG we can pass through safely.
+  const orientation = meta.orientation ?? 1
+  if (target === longest && orientation === 1) return { data, mediaType }
   const scale = target / longest
   const width = Math.max(1, Math.round((meta.width ?? 1) * scale))
   const height = Math.max(1, Math.round((meta.height ?? 1) * scale))
   const resized = await sharp(data, { failOn: 'none' })
+    .autoOrient()
     .resize(width, height)
     .jpeg({ quality: 90 })
     .toBuffer()

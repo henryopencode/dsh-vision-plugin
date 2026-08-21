@@ -1121,28 +1121,37 @@ export function apply(ctx: ClientContext): void {
     addButton.textContent = '＋'
     addButton.title = '添加文件或图片'
     addButton.style.cssText = [
-      'position:fixed', 'z-index:9995', 'width:28px', 'height:28px',
-      'border-radius:50%', 'border:1px solid rgba(128,128,128,.4)',
+      'width:28px', 'height:28px', 'flex:none', 'border-radius:50%',
+      'border:1px solid rgba(128,128,128,.4)',
       'background:rgba(28,28,32,.85)', 'color:#ddd', 'cursor:pointer',
-      'font:16px/1 sans-serif', 'display:flex', 'align-items:center',
-      'justify-content:center', 'padding:0',
+      'font:16px/1 sans-serif', 'display:inline-flex', 'align-items:center',
+      'justify-content:center', 'padding:0', 'margin:8px 0 8px 12px',
     ].join(';')
     addButton.addEventListener('click', () => input.click())
     document.body.appendChild(addButton)
-    const positionAddButton = (): void => {
+    // Anchor inside the composer card (bottom-left, next to the input) so it
+    // participates in layout instead of floating over other buttons. Fall
+    // back to fixed positioning only when the composer is absent.
+    const placeAddButton = (): void => {
       const composer = document.querySelector('[data-composer-card]')
-      if (composer !== null) {
-        const rect = composer.getBoundingClientRect()
-        addButton.style.left = `${rect.left + 8}px`
-        addButton.style.top = `${rect.bottom - 38}px`
-      } else {
+      if (composer === null) {
+        addButton.style.position = 'fixed'
         addButton.style.left = '12px'
         addButton.style.bottom = '96px'
         addButton.style.top = 'auto'
+        addButton.style.zIndex = '9995'
+        return
       }
+      if (addButton.parentElement === composer) return
+      addButton.style.position = 'static'
+      addButton.style.zIndex = ''
+      addButton.style.left = ''
+      addButton.style.bottom = ''
+      addButton.style.top = ''
+      composer.append(addButton)
     }
-    positionAddButton()
-    const repositionTimer = window.setInterval(positionAddButton, 800)
+    placeAddButton()
+    const repositionTimer = window.setInterval(placeAddButton, 800)
 
     // Drag & drop a file onto the page uploads it too. Intercept at the
     // window capture phase (before DSH's own listeners) and stop immediate

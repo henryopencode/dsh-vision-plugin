@@ -968,37 +968,43 @@ window.__ModuleLoader__.load({
 				addButton.textContent = "＋";
 				addButton.title = "添加文件或图片";
 				addButton.style.cssText = [
-					"position:fixed",
-					"z-index:9995",
 					"width:28px",
 					"height:28px",
+					"flex:none",
 					"border-radius:50%",
 					"border:1px solid rgba(128,128,128,.4)",
 					"background:rgba(28,28,32,.85)",
 					"color:#ddd",
 					"cursor:pointer",
 					"font:16px/1 sans-serif",
-					"display:flex",
+					"display:inline-flex",
 					"align-items:center",
 					"justify-content:center",
-					"padding:0"
+					"padding:0",
+					"margin:8px 0 8px 12px"
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
-				const positionAddButton = () => {
+				const placeAddButton = () => {
 					const composer = document.querySelector("[data-composer-card]");
-					if (composer !== null) {
-						const rect = composer.getBoundingClientRect();
-						addButton.style.left = `${rect.left + 8}px`;
-						addButton.style.top = `${rect.bottom - 38}px`;
-					} else {
+					if (composer === null) {
+						addButton.style.position = "fixed";
 						addButton.style.left = "12px";
 						addButton.style.bottom = "96px";
 						addButton.style.top = "auto";
+						addButton.style.zIndex = "9995";
+						return;
 					}
+					if (addButton.parentElement === composer) return;
+					addButton.style.position = "static";
+					addButton.style.zIndex = "";
+					addButton.style.left = "";
+					addButton.style.bottom = "";
+					addButton.style.top = "";
+					composer.append(addButton);
 				};
-				positionAddButton();
-				const repositionTimer = window.setInterval(positionAddButton, 800);
+				placeAddButton();
+				const repositionTimer = window.setInterval(placeAddButton, 800);
 				const hasFiles = (event) => Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files");
 				const swallow = (event) => {
 					event.preventDefault();
