@@ -276,7 +276,7 @@ window.__ModuleLoader__.load({
 			el.style.right = "";
 			el.style.bottom = "";
 			el.style.transform = "";
-			el.style.margin = "0";
+			el.style.margin = "auto 0";
 			const composer = document.querySelector("[data-composer-card]");
 			if (composer === null) {
 				if (el.parentElement !== document.body) document.body.appendChild(el);
@@ -1039,7 +1039,7 @@ window.__ModuleLoader__.load({
 					"align-items:center",
 					"justify-content:center",
 					"padding:0",
-					"margin:0"
+					"margin:auto 0"
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
@@ -1059,7 +1059,8 @@ window.__ModuleLoader__.load({
 							"justify-content:flex-start",
 							"gap:6px",
 							"flex-wrap:nowrap",
-							"padding:4px 12px",
+							"padding:0 12px",
+							"min-height:30px",
 							"border-bottom:1px solid rgba(128,128,128,.15)",
 							"min-width:0",
 							"overflow:visible",
