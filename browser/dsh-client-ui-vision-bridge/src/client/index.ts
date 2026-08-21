@@ -828,7 +828,17 @@ export function apply(ctx: ClientContext): void {
     }
     const images = content.filter(isImagePart)
     if (images.length === 0) return originalFetch(input, init)
-    if (!readConfig().recognizeEnabled) return originalFetch(input, init)
+    if (!readConfig().recognizeEnabled) {
+      // Recognition is off: don't forward the image (the chat model can't
+      // take image input and a big base64 body trips HTTP 413). Replace the
+      // image parts with a clear notice, keeping the user's text.
+      const note = `【识图已关闭】当前未启用图片识别（recognizeEnabled: false），已跳过 ${images.length} 张图片。请粘贴 Word/PDF 文件上传，或在浏览器控制台执行 localStorage.setItem('dsh-vision:config', JSON.stringify({ recognizeEnabled: true, uploadEnabled: true })) 后刷新以开启识图。`
+      const kept: ({ type: 'text'; text: string })[] = texts.trim().length > 0
+        ? [{ type: 'text', text: texts.trim() }]
+        : []
+      payload.content = [...kept, { type: 'text', text: note }]
+      return originalFetch(input, { ...init, body: JSON.stringify(envelope) })
+    }
 
     const userQuestion = texts.trim().length > 0 ? texts.trim() : undefined
 

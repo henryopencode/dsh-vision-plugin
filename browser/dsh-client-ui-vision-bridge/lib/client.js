@@ -702,7 +702,20 @@ window.__ModuleLoader__.load({
 				}
 				const images = content.filter(isImagePart);
 				if (images.length === 0) return originalFetch(input, init);
-				if (!readConfig().recognizeEnabled) return originalFetch(input, init);
+				if (!readConfig().recognizeEnabled) {
+					const note = `【识图已关闭】当前未启用图片识别（recognizeEnabled: false），已跳过 ${images.length} 张图片。请粘贴 Word/PDF 文件上传，或在浏览器控制台执行 localStorage.setItem('dsh-vision:config', JSON.stringify({ recognizeEnabled: true, uploadEnabled: true })) 后刷新以开启识图。`;
+					payload.content = [...texts.trim().length > 0 ? [{
+						type: "text",
+						text: texts.trim()
+					}] : [], {
+						type: "text",
+						text: note
+					}];
+					return originalFetch(input, {
+						...init,
+						body: JSON.stringify(envelope)
+					});
+				}
 				const userQuestion = texts.trim().length > 0 ? texts.trim() : void 0;
 				const probe = await probeModels(originalFetch, config);
 				if (!probe.ok) {
