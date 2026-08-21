@@ -396,13 +396,49 @@ function positionIndicator(el: HTMLElement): void {
 }
 
 /**
- * Status pill removed per user request: recognition feedback lives on the
- * thumbnail overlay ("识别中 Xs") instead. This no-op keeps the call sites
- * intact and removes any stale pill element.
+ * Update (or create) the status pill. It shows readiness (就绪/不可用/关闭)
+ * and doubles as the bridge switch. During recognition the pill keeps saying
+ * "识图就绪" — the live "识别中 Xs" feedback lives on the thumbnail overlay.
+ * @param state - the state to show.
+ * @param detail - optional detail text.
+ * @param onToggle - callback for a click (toggle the bridge).
  */
-function updateStatusIndicator(_state: IndicatorState, _detail: string | undefined, _onToggle: () => void): void {
-  const existing = document.getElementById('dsh-vision-indicator')
-  if (existing !== null) existing.remove()
+function updateStatusIndicator(state: IndicatorState, detail: string | undefined, onToggle: () => void): void {
+  let el = document.getElementById('dsh-vision-indicator')
+  if (el === null) {
+    el = document.createElement('button')
+    el.id = 'dsh-vision-indicator'
+    el.title = '点击开启/关闭本地识图'
+    el.style.cssText = [
+      'border:1px solid rgba(128,128,128,.35)',
+      'background:rgba(28,28,32,.85)', 'color:#ddd', 'cursor:pointer',
+      'padding:0 12px', 'border-radius:999px', 'height:30px',
+      'box-sizing:border-box',
+      'font:12px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif',
+      'box-shadow:0 2px 8px rgba(0,0,0,.2)', 'white-space:nowrap',
+      'display:inline-flex', 'align-items:center', 'justify-content:center',
+    ].join(';')
+    const created = el
+    el.addEventListener('click', () => {
+      if (created.dataset.busy === '1') return
+      onToggle()
+    })
+  }
+  if (state === 'busy') {
+    // Keep showing "识图就绪"; the ticking counter lives on thumbnails.
+    el.dataset.busy = '1'
+    el.textContent = '🟢 识图就绪'
+  } else {
+    delete el.dataset.busy
+    const dot = state === 'online' ? '🟢'
+      : state === 'disabled' ? '⚪'
+        : '🔴'
+    const label = state === 'online' ? '识图就绪'
+      : state === 'disabled' ? '识图已关闭（点击开启）'
+        : '识图不可用'
+    el.textContent = `${dot} ${label}${detail === undefined ? '' : ` · ${detail}`}`
+  }
+  positionIndicator(el)
 }
 
 
@@ -1031,11 +1067,8 @@ export function apply(ctx: ClientContext): void {
       if (images.length > config.maxImages) {
         recognized.push(`⚠️ 另有 ${images.length - config.maxImages} 张图片未识别（单条消息最多识别 ${config.maxImages} 张）`)
       }
-      // "✅ 完成 13s" briefly, then back to ready.
-      updateStatusIndicator('online', `完成 ${elapsedSec}s`, toggleBridge)
-      window.setTimeout(() => {
-        updateStatusIndicator('online', undefined, toggleBridge)
-      }, 2500)
+      // Pill stays "识图就绪" — no status change on completion.
+      updateStatusIndicator('online', undefined, toggleBridge)
     } else {
       // Recognition failed (remote rate limit, service down, timeout…). The
       // message still goes out with a notice — the user's flow is never
