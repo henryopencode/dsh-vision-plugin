@@ -1202,11 +1202,19 @@ export function apply(ctx: ClientContext): void {
         rail = document.createElement('div')
         rail.id = 'dsh-vision-ui-rail'
         rail.style.cssText = [
-          'display:flex', 'align-items:center', 'gap:6px', 'flex-wrap:nowrap',
-          'padding:0 12px', 'border-bottom:1px solid rgba(128,128,128,.15)',
+          'display:flex', 'align-items:center', 'justify-content:flex-start',
+          'gap:6px', 'flex-wrap:nowrap',
+          'padding:0 12px', 'min-height:36px',
+          'border-bottom:1px solid rgba(128,128,128,.15)',
           'min-width:0', 'overflow:visible',
         ].join(';')
         composer.insertBefore(rail, composer.firstChild)
+      }
+      // The status pill belongs first in the rail (it may have been created
+      // before the rail existed and ended up on document.body).
+      const pill = document.getElementById('dsh-vision-indicator')
+      if (pill !== null && pill.parentElement !== rail) {
+        rail.insertBefore(pill, rail.firstChild)
       }
       return rail
     }
@@ -1220,10 +1228,13 @@ export function apply(ctx: ClientContext): void {
         return
       }
       const pill = document.getElementById('dsh-vision-indicator')
-      const anchor = pill !== null && pill.parentElement === rail ? pill : null
-      if (addButton.parentElement !== rail || (anchor !== null && addButton.previousSibling !== pill)) {
-        if (anchor !== null) pill.after(addButton)
-        else rail.append(addButton)
+      if (pill !== null && pill.parentElement !== rail) {
+        rail.insertBefore(pill, rail.firstChild)
+      }
+      const expected = pill !== null ? pill.nextSibling : rail.firstChild
+      if (addButton.parentElement !== rail || addButton !== expected) {
+        if (pill !== null) pill.after(addButton)
+        else rail.insertBefore(addButton, rail.firstChild)
       }
     }
     placeAddButton()
