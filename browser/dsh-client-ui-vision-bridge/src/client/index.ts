@@ -926,11 +926,11 @@ export function apply(ctx: ClientContext): void {
         updateStatusIndicator('online', undefined, toggleBridge)
       }, 2500)
     } else {
-      // The same-origin endpoint is absent or unreachable. Fail fast instead
-      // of falling back to cross-origin Ollama calls, which hang in embedded
-      // WebViews: the message goes out with an explicit note within seconds.
+      // Recognition failed (remote rate limit, service down, timeout…). The
+      // message still goes out with a notice — the user's flow is never
+      // blocked, they just see the picture was not recognized.
       recognized.push(
-        `⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。首次识别需加载模型（无 GPU 时可能 1-2 分钟），请重试；若仍失败请确认 Ollama 已启动、vision-server 已部署。`,
+        `⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`,
       )
       updateStatusIndicator('offline', undefined, toggleBridge)
     }

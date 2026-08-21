@@ -56,7 +56,10 @@ function readBody(req) {
 /** One chat-completion call against an OpenAI-compatible endpoint. Local
  * Ollama (no apiKey) may pass num_ctx; remote providers (apiKey set) ignore
  * it, so only include it for the local case. Some remote providers cap
- * max_tokens (Zhipu: 1..1024) — clamp to a safe bound when remote. */
+ * max_tokens (Zhipu: 1..1024) — clamp to a safe bound when remote.
+ * 429 (rate limit) is retried with backoff so a busy free tier does not
+ * block the user's flow — by the time we give up the browser still sends
+ * the message with a notice instead of dropping it. */
 async function chatCompletion(baseURL, model, messages, maxTokens, signal, numCtx = 32768, apiKey) {
   const headers = { 'Content-Type': 'application/json' }
   if (apiKey !== undefined && apiKey !== '') headers.Authorization = `Bearer ${apiKey}`
@@ -68,22 +71,32 @@ async function chatCompletion(baseURL, model, messages, maxTokens, signal, numCt
     stream: false,
   }
   if (apiKey === undefined || apiKey === '') body.num_ctx = numCtx
-  const response = await fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal,
-  })
-  if (!response.ok) {
+  const attempts = 3
+  let lastDetail = ''
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1200 * attempt))
+    }
+    const response = await fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (response.ok) {
+      const payload = await response.json()
+      const content = payload?.choices?.[0]?.message?.content
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        throw new Error(`模型 ${model} 返回为空`)
+      }
+      return content.trim()
+    }
     const detail = await response.text().catch(() => '')
-    throw new Error(`模型 ${model} 请求失败 HTTP ${response.status}${detail === '' ? '' : `：${detail.slice(0, 200)}`}`)
+    lastDetail = detail
+    // Only 429 (rate limit) is worth retrying; anything else fails fast.
+    if (response.status !== 429) break
   }
-  const payload = await response.json()
-  const content = payload?.choices?.[0]?.message?.content
-  if (typeof content !== 'string' || content.trim().length === 0) {
-    throw new Error(`模型 ${model} 返回为空`)
-  }
-  return content.trim()
+  throw new Error(`模型 ${model} 请求失败 HTTP 429（限流）${lastDetail === '' ? '' : `：${lastDetail.slice(0, 200)}`}`)
 }
 
 /** Strip DeepSeek-OCR structural noise. */

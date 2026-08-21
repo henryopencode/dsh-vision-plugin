@@ -788,7 +788,7 @@ window.__ModuleLoader__.load({
 						updateStatusIndicator("online", void 0, toggleBridge);
 					}, 2500);
 				} else {
-					recognized.push(`⚠️ 本地识图服务不可用（${elapsedSec} 秒内未响应）。首次识别需加载模型（无 GPU 时可能 1-2 分钟），请重试；若仍失败请确认 Ollama 已启动、vision-server 已部署。`);
+					recognized.push(`⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`);
 					updateStatusIndicator("offline", void 0, toggleBridge);
 				}
 				const rewritten = [];
