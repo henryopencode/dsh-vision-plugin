@@ -850,6 +850,7 @@ function addLocalFiles(originalFetch: typeof fetch, files: FileList | File[]): v
             name: file.name,
           })
           renderLocalImageDraft()
+          enableSendButton()
         } catch {
           showUploadChip(`⚠️ 无法读取图片 ${file.name}`)
         }
@@ -881,6 +882,30 @@ function readFileAsBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('read failed'))
     reader.readAsDataURL(file)
   })
+}
+
+/**
+ * Enable DSH's send button when only an image was picked (pasted/dropped/
+ * "＋"): the image lives in our own draft so DSH sees no text content. Inject
+ * a zero-width placeholder into the textarea and fire an input event — DSH
+ * sees content and enables send. patchedFetch strips the placeholder before
+ * sending.
+ */
+function enableSendButton(): void {
+  const composer = document.querySelector('[data-composer-card]')
+  if (composer === null) return
+  const textarea = composer.querySelector('textarea')
+  if (textarea === null || textarea.readOnly || textarea.disabled) return
+  const placeholder = '\u200b'
+  if (!textarea.value.includes(placeholder)) {
+    textarea.value = placeholder + textarea.value
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+}
+
+/** Remove the zero-width send-placeholder from a message text. */
+function stripSendPlaceholder(text: string): string {
+  return text.replace(/\u200b/g, '').trim()
 }
 
 /**
@@ -988,6 +1013,7 @@ function handleFilePaste(originalFetch: typeof fetch, event: ClipboardEvent): vo
             name: file.name,
           })
           renderLocalImageDraft()
+          enableSendButton()
         } catch {
           showUploadChip(`⚠️ 无法读取图片 ${file.name}`)
         }
@@ -1038,6 +1064,7 @@ function handleFileDrop(originalFetch: typeof fetch, files: FileList | File[]): 
             name: file.name,
           })
           renderLocalImageDraft()
+          enableSendButton()
         } catch {
           showUploadChip(`⚠️ 无法读取图片 ${file.name}`)
         }
@@ -1190,7 +1217,7 @@ export function apply(ctx: ClientContext): void {
     // Strip the zero-width send-placeholder (used to enable the send button
     // when only an image was picked) from every text part.
     content = content.map(part =>
-      isTextPart(part) ? { type: 'text' as const, text: (part.text ?? '').trim() } : part)
+      isTextPart(part) ? { type: 'text' as const, text: stripSendPlaceholder(part.text ?? '') } : part)
     payload.content = content
 
     const texts = content.filter(isTextPart).map(part => part.text ?? '').join('')

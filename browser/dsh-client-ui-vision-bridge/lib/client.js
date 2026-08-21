@@ -741,6 +741,7 @@ window.__ModuleLoader__.load({
 							name: file.name
 						});
 						renderLocalImageDraft();
+						enableSendButton();
 					} catch {
 						showUploadChip(`⚠️ 无法读取图片 ${file.name}`);
 					}
@@ -766,6 +767,28 @@ window.__ModuleLoader__.load({
 				reader.onerror = () => reject(reader.error ?? /* @__PURE__ */ new Error("read failed"));
 				reader.readAsDataURL(file);
 			});
+		}
+		/**
+		* Enable DSH's send button when only an image was picked (pasted/dropped/
+		* "＋"): the image lives in our own draft so DSH sees no text content. Inject
+		* a zero-width placeholder into the textarea and fire an input event — DSH
+		* sees content and enables send. patchedFetch strips the placeholder before
+		* sending.
+		*/
+		function enableSendButton() {
+			const composer = document.querySelector("[data-composer-card]");
+			if (composer === null) return;
+			const textarea = composer.querySelector("textarea");
+			if (textarea === null || textarea.readOnly || textarea.disabled) return;
+			const placeholder = "​";
+			if (!textarea.value.includes(placeholder)) {
+				textarea.value = placeholder + textarea.value;
+				textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			}
+		}
+		/** Remove the zero-width send-placeholder from a message text. */
+		function stripSendPlaceholder(text) {
+			return text.replace(/\u200b/g, "").trim();
 		}
 		/**
 		* Resolve the most recently active session's working directory via the
@@ -862,6 +885,7 @@ window.__ModuleLoader__.load({
 						name: file.name
 					});
 					renderLocalImageDraft();
+					enableSendButton();
 				} catch {
 					showUploadChip(`⚠️ 无法读取图片 ${file.name}`);
 				}
@@ -900,6 +924,7 @@ window.__ModuleLoader__.load({
 						name: file.name
 					});
 					renderLocalImageDraft();
+					enableSendButton();
 				} catch {
 					showUploadChip(`⚠️ 无法读取图片 ${file.name}`);
 				}
@@ -1016,7 +1041,7 @@ window.__ModuleLoader__.load({
 				}
 				content = content.map((part) => isTextPart(part) ? {
 					type: "text",
-					text: (part.text ?? "").trim()
+					text: stripSendPlaceholder(part.text ?? "")
 				} : part);
 				payload.content = content;
 				const texts = content.filter(isTextPart).map((part) => part.text ?? "").join("");
