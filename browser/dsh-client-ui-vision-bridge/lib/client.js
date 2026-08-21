@@ -276,13 +276,18 @@ window.__ModuleLoader__.load({
 			el.style.right = "";
 			el.style.bottom = "";
 			el.style.transform = "";
+			el.style.margin = "6px 0 0 12px";
 			const composer = document.querySelector("[data-composer-card]");
 			if (composer === null) {
 				if (el.parentElement !== document.body) document.body.appendChild(el);
 				return;
 			}
-			const anchor = composer.querySelector("textarea")?.parentElement ?? composer;
-			if (el.parentElement !== anchor || el.previousSibling === null && anchor.firstChild !== el) anchor.insertBefore(el, anchor.firstChild);
+			const rail = document.getElementById("dsh-vision-ui-rail");
+			if (rail !== null) {
+				if (el.parentElement !== rail) rail.append(el);
+				return;
+			}
+			if (el.parentElement !== composer) composer.insertBefore(el, composer.firstChild);
 		}
 		/**
 		* Update (or create) the status pill over the middle content column: it only
@@ -1033,31 +1038,47 @@ window.__ModuleLoader__.load({
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
-				const placeAddButton = () => {
+				const ensureRail = () => {
 					const composer = document.querySelector("[data-composer-card]");
-					const anchor = composer?.querySelector("textarea")?.parentElement ?? composer ?? document.body;
-					if (addButton.parentElement !== anchor) {
-						addButton.style.position = "static";
-						addButton.style.zIndex = "";
-						addButton.style.left = "";
-						addButton.style.bottom = "";
-						addButton.style.top = "";
-						const pill = document.getElementById("dsh-vision-indicator");
-						if (pill !== null && pill.parentElement === anchor) pill.after(addButton);
-						else anchor.insertBefore(addButton, anchor.firstChild);
+					if (composer === null) return null;
+					let rail = document.getElementById("dsh-vision-ui-rail");
+					if (rail === null) {
+						rail = document.createElement("div");
+						rail.id = "dsh-vision-ui-rail";
+						rail.style.cssText = [
+							"display:flex",
+							"align-items:center",
+							"gap:6px",
+							"flex-wrap:wrap",
+							"padding:0 12px",
+							"border-bottom:1px solid rgba(128,128,128,.15)"
+						].join(";");
+						composer.insertBefore(rail, composer.firstChild);
 					}
+					return rail;
+				};
+				const placeAddButton = () => {
+					const rail = ensureRail();
+					if (rail === null) {
+						if (addButton.parentElement !== document.body) document.body.appendChild(addButton);
+						return;
+					}
+					const pill = document.getElementById("dsh-vision-indicator");
+					const anchor = pill !== null && pill.parentElement === rail ? pill : null;
+					if (addButton.parentElement !== rail || anchor !== null && addButton.previousSibling !== pill) if (anchor !== null) pill.after(addButton);
+					else rail.append(addButton);
 				};
 				placeAddButton();
 				const repositionTimer = window.setInterval(placeAddButton, 400);
 				let rowObserver;
 				const watchRow = () => {
-					const row = (document.querySelector("[data-composer-card]")?.querySelector("textarea"))?.parentElement ?? null;
-					if (row === null) return;
+					const composer = document.querySelector("[data-composer-card]");
+					if (composer === null) return;
 					if (rowObserver !== void 0) rowObserver.disconnect();
 					rowObserver = new MutationObserver(() => placeAddButton());
-					rowObserver.observe(row, {
+					rowObserver.observe(composer, {
 						childList: true,
-						subtree: false
+						subtree: true
 					});
 				};
 				watchRow();

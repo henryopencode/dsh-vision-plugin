@@ -376,14 +376,20 @@ function positionIndicator(el: HTMLElement): void {
   el.style.right = ''
   el.style.bottom = ''
   el.style.transform = ''
+  el.style.margin = '6px 0 0 12px'
   const composer = document.querySelector('[data-composer-card]')
   if (composer === null) {
     if (el.parentElement !== document.body) document.body.appendChild(el)
     return
   }
-  const anchor = composer.querySelector('textarea')?.parentElement ?? composer
-  if (el.parentElement !== anchor || el.previousSibling === null && anchor.firstChild !== el) {
-    anchor.insertBefore(el, anchor.firstChild)
+  // Top of the composer card: a toolbar row above the input, never inside it.
+  const rail = document.getElementById('dsh-vision-ui-rail')
+  if (rail !== null) {
+    if (el.parentElement !== rail) rail.append(el)
+    return
+  }
+  if (el.parentElement !== composer) {
+    composer.insertBefore(el, composer.firstChild)
   }
 }
 
@@ -1181,23 +1187,34 @@ export function apply(ctx: ClientContext): void {
     // Anchor inside the composer card (bottom-left, next to the input) so it
     // participates in layout instead of floating over other buttons. Fall
     // back to fixed positioning only when the composer is absent.
-    // Mount next to the pill inside the composer (layout flow, never fixed).
-    const placeAddButton = (): void => {
+    // Mount in a shared rail at the top of the composer (layout flow, never
+    // fixed, never inside the input). The rail also hosts the status pill.
+    const ensureRail = (): HTMLElement | null => {
       const composer = document.querySelector('[data-composer-card]')
-      const anchor = composer?.querySelector('textarea')?.parentElement ?? composer ?? document.body
-      if (addButton.parentElement !== anchor) {
-        addButton.style.position = 'static'
-        addButton.style.zIndex = ''
-        addButton.style.left = ''
-        addButton.style.bottom = ''
-        addButton.style.top = ''
-        // Insert after the pill if present, else as the first element.
-        const pill = document.getElementById('dsh-vision-indicator')
-        if (pill !== null && pill.parentElement === anchor) {
-          pill.after(addButton)
-        } else {
-          anchor.insertBefore(addButton, anchor.firstChild)
-        }
+      if (composer === null) return null
+      let rail = document.getElementById('dsh-vision-ui-rail')
+      if (rail === null) {
+        rail = document.createElement('div')
+        rail.id = 'dsh-vision-ui-rail'
+        rail.style.cssText = [
+          'display:flex', 'align-items:center', 'gap:6px', 'flex-wrap:wrap',
+          'padding:0 12px', 'border-bottom:1px solid rgba(128,128,128,.15)',
+        ].join(';')
+        composer.insertBefore(rail, composer.firstChild)
+      }
+      return rail
+    }
+    const placeAddButton = (): void => {
+      const rail = ensureRail()
+      if (rail === null) {
+        if (addButton.parentElement !== document.body) document.body.appendChild(addButton)
+        return
+      }
+      const pill = document.getElementById('dsh-vision-indicator')
+      const anchor = pill !== null && pill.parentElement === rail ? pill : null
+      if (addButton.parentElement !== rail || (anchor !== null && addButton.previousSibling !== pill)) {
+        if (anchor !== null) pill.after(addButton)
+        else rail.append(addButton)
       }
     }
     placeAddButton()
@@ -1205,12 +1222,10 @@ export function apply(ctx: ClientContext): void {
     let rowObserver
     const watchRow = (): void => {
       const composer = document.querySelector('[data-composer-card]')
-      const textarea = composer?.querySelector('textarea')
-      const row = textarea?.parentElement ?? null
-      if (row === null) return
+      if (composer === null) return
       if (rowObserver !== undefined) rowObserver.disconnect()
       rowObserver = new MutationObserver(() => placeAddButton())
-      rowObserver.observe(row, { childList: true, subtree: false })
+      rowObserver.observe(composer, { childList: true, subtree: true })
     }
     watchRow()
     const rowWatchTimer = window.setInterval(watchRow, 1000)
