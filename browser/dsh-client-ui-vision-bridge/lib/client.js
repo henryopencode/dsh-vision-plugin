@@ -468,16 +468,35 @@ window.__ModuleLoader__.load({
 				chip.append(remove);
 				bar.append(chip);
 			}
-			document.body.appendChild(bar);
 			const composer = document.querySelector("[data-composer-card]");
-			if (composer !== null) {
-				const rect = composer.getBoundingClientRect();
-				bar.style.left = `${rect.left + 12}px`;
-				bar.style.top = `${Math.max(4, rect.top - bar.offsetHeight - 10)}px`;
+			if (composer !== null && composer.firstChild !== null) {
+				bar.style.cssText = [
+					"display:flex",
+					"gap:6px",
+					"flex-wrap:wrap",
+					"max-width:70vw",
+					"padding:8px 12px 0"
+				].join(";");
+				composer.insertBefore(bar, composer.firstChild);
 			} else {
-				bar.style.left = "50%";
-				bar.style.top = "60px";
-				bar.style.transform = "translateX(-50%)";
+				document.body.appendChild(bar);
+				bar.style.cssText = [
+					"position:fixed",
+					"z-index:9996",
+					"display:flex",
+					"gap:6px",
+					"flex-wrap:wrap",
+					"max-width:70vw"
+				].join(";");
+				if (composer !== null) {
+					const rect = composer.getBoundingClientRect();
+					bar.style.left = `${rect.left + 12}px`;
+					bar.style.top = `${Math.max(4, rect.top - bar.offsetHeight - 10)}px`;
+				} else {
+					bar.style.left = "50%";
+					bar.style.top = "60px";
+					bar.style.transform = "translateX(-50%)";
+				}
 			}
 		}
 		/**
