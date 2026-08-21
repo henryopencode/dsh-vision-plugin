@@ -433,11 +433,24 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
     })
   }
   if (state === 'busy') {
-    // Recognition in progress: pill stays "ready-looking" and non-clickable.
+    // Recognition in progress: pill shows a live ticking counter and stays
+    // non-clickable. The interval is cleared on the next (non-busy) update.
     el.dataset.busy = '1'
-    el.textContent = '🟢 识图就绪'
+    const startedAt = Date.now()
+    const tick = (): void => {
+      const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+      el.textContent = `⏳ 识别中 ${sec}s`
+    }
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    el.dataset.timer = String(timer)
   } else {
     delete el.dataset.busy
+    const timer = Number(el.dataset.timer)
+    if (Number.isFinite(timer) && timer > 0) {
+      window.clearInterval(timer)
+      delete el.dataset.timer
+    }
     const dot = state === 'online' ? '🟢'
       : state === 'disabled' ? '⚪'
         : '🔴'
@@ -447,91 +460,6 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
     el.textContent = `${dot} ${label}${detail === undefined ? '' : ` · ${detail}`}`
   }
   positionIndicator(el)
-}
-
-/**
- * Show (or update) a "sending" card above the composer: the first image with
- * a translucent overlay showing the current recognition stage. Removed when
- * recognition finishes and the real message appears.
- * @param images - image parts (first one is previewed).
- * @param stage - current stage text.
- */
-function showProgressCard(images: PromptImagePart[], stage: string, sessionId: string | undefined): void {
-  let card = document.getElementById('dsh-vision-progress')
-  if (card === null) {
-    card = document.createElement('div')
-    card.id = 'dsh-vision-progress'
-    card.style.cssText = [
-      'position:fixed', 'z-index:9997', 'background:rgba(26,26,30,.94)',
-      'border:1px solid rgba(128,128,128,.35)', 'border-radius:12px',
-      'padding:8px', 'box-shadow:0 6px 24px rgba(0,0,0,.35)',
-    ].join(';')
-    const frame = document.createElement('div')
-    frame.style.cssText = [
-      'position:relative', 'width:180px', 'height:135px', 'overflow:hidden',
-      'border-radius:8px',
-    ].join(';')
-    const img = document.createElement('img')
-    img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
-    const first = images.find(image => typeof image.data === 'string' && image.data.length > 0)
-    img.src = first === undefined || first.data === ''
-      ? ''
-      : `data:${first.mediaType ?? 'image/png'};base64,${first.data}`
-    img.alt = '正在识别的图片'
-    const overlay = document.createElement('div')
-    overlay.id = 'dsh-vision-progress-overlay'
-    overlay.style.cssText = [
-      'position:absolute', 'inset:0', 'background:rgba(0,0,0,.55)',
-      'display:flex', 'align-items:center', 'justify-content:center',
-      'color:#fff', 'font:13px/1.6 -apple-system,"PingFang SC",sans-serif',
-      'text-align:center', 'padding:10px',
-    ].join(';')
-    frame.append(img, overlay)
-    card.append(frame)
-    document.body.appendChild(card)
-  }
-  // This card belongs to the session that initiated recognition. The
-  // visibility watchdog below hides it while the user views a different
-  // session, and brings it back when they return — recognition itself keeps
-  // running in the background either way.
-  card.dataset.session = sessionId ?? ''
-  const overlay = document.getElementById('dsh-vision-progress-overlay')
-  if (overlay !== null) overlay.textContent = `📷 ${stage}`
-  // Anchor above the composer card, centered.
-  const composer = document.querySelector('[data-composer-card]')
-  if (composer !== null) {
-    const rect = composer.getBoundingClientRect()
-    card.style.left = `${rect.left + rect.width / 2 - 98}px`
-    card.style.top = `${Math.max(4, rect.top - 165)}px`
-  } else {
-    card.style.left = '50%'
-    card.style.top = 'auto'
-    card.style.bottom = '96px'
-    card.style.transform = 'translateX(-50%)'
-  }
-  // Per-session visibility: hide the card while the user is in another
-  // session, show it again when they come back. Recognition is not cancelled.
-  if (card.dataset.watch === undefined) {
-    card.dataset.watch = String(window.setInterval(() => {
-      const live = document.getElementById('dsh-vision-progress')
-      if (live === null) return
-      const owner = live.dataset.session
-      // Only hide when we can positively identify both sides; with no
-      // session ids available keep the card visible.
-      if (owner !== undefined && owner !== '' && activeSessionId !== undefined && activeSessionId !== '') {
-        live.style.display = activeSessionId === owner ? '' : 'none'
-      }
-    }, 400))
-  }
-}
-
-/** Remove the "sending" progress card. */
-function removeProgressCard(): void {
-  const card = document.getElementById('dsh-vision-progress')
-  if (card === null) return
-  const watch = card.dataset.watch
-  if (watch !== undefined) window.clearInterval(Number(watch))
-  card.remove()
 }
 
 /** Uploaded files pending attachment to the next outgoing message. */
@@ -1079,17 +1007,10 @@ export function apply(ctx: ClientContext): void {
     // Preferred path: one same-origin call to the vision-server plugin, which
     // downscales and runs the models on the reliable server network stack.
     const started = Date.now()
-    showProgressCard(targetImages, '正在识别…', payload.sessionId)
-    // The pill stays simple ("⏳ 识别中"); stage details live on the
-    // sending progress card only — showing both was redundant.
+    // The pill shows a live "识别中 Xs" counter; no separate progress card.
     updateStatusIndicator('busy', undefined, toggleBridge)
-    const stageOf = (stage: string): void => {
-      const overlay = document.getElementById('dsh-vision-progress-overlay')
-      if (overlay !== null) overlay.textContent = `📷 ${stage}`
-    }
-    const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion, stageOf)
+    const serverResults = await recognizeViaServer(originalFetch, config, targetImages, userQuestion, undefined)
     const elapsedSec = Math.round((Date.now() - started) / 1000)
-    removeProgressCard()
     if (serverResults !== undefined) {
       for (const result of serverResults.results) {
         let text = `【画面】\n${result.scene}`
