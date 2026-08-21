@@ -363,17 +363,28 @@ async function probeModels(
 type IndicatorState = 'online' | 'offline' | 'busy' | 'disabled'
 
 /**
- * Position the pill fixed at the top-center of the viewport. It must NOT
- * chase layout: session switches re-render the composer card, which would
- * drag the pill around the page.
+ * Mount the pill inside the composer card (top row) so it sits in the
+ * layout, anchored to the composer — never window-fixed, so it cannot end up
+ * in the wrong place across sessions/scroll.
  * @param el - the indicator element.
  */
 function positionIndicator(el: HTMLElement): void {
-  el.style.top = '10px'
-  el.style.left = '50%'
-  el.style.right = 'auto'
-  el.style.bottom = 'auto'
-  el.style.transform = 'translateX(-50%)'
+  el.style.position = 'static'
+  el.style.zIndex = ''
+  el.style.top = ''
+  el.style.left = ''
+  el.style.right = ''
+  el.style.bottom = ''
+  el.style.transform = ''
+  const composer = document.querySelector('[data-composer-card]')
+  if (composer === null) {
+    if (el.parentElement !== document.body) document.body.appendChild(el)
+    return
+  }
+  const anchor = composer.querySelector('textarea')?.parentElement ?? composer
+  if (el.parentElement !== anchor || el.previousSibling === null && anchor.firstChild !== el) {
+    anchor.insertBefore(el, anchor.firstChild)
+  }
 }
 
 /**
@@ -399,18 +410,18 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
     el.id = 'dsh-vision-indicator'
     el.title = '点击开启/关闭本地识图'
     el.style.cssText = [
-      'position:fixed', 'z-index:9998', 'border:1px solid rgba(128,128,128,.35)',
+      'border:1px solid rgba(128,128,128,.35)',
       'background:rgba(28,28,32,.85)', 'color:#ddd', 'cursor:pointer',
       'padding:4px 12px', 'border-radius:999px',
       'font:12px/1.4 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif',
       'box-shadow:0 2px 8px rgba(0,0,0,.2)', 'white-space:nowrap',
+      'display:inline-flex', 'align-items:center', 'margin:4px 6px 0',
     ].join(';')
     const created = el
     el.addEventListener('click', () => {
       if (created.dataset.busy === '1') return
       onToggle()
     })
-    document.body.appendChild(el)
   }
   if (state === 'busy') {
     // Recognition in progress: pill stays "ready-looking" and non-clickable.
@@ -1170,39 +1181,23 @@ export function apply(ctx: ClientContext): void {
     // Anchor inside the composer card (bottom-left, next to the input) so it
     // participates in layout instead of floating over other buttons. Fall
     // back to fixed positioning only when the composer is absent.
+    // Mount next to the pill inside the composer (layout flow, never fixed).
     const placeAddButton = (): void => {
       const composer = document.querySelector('[data-composer-card]')
-      if (composer === null) {
-        if (addButton.parentElement !== document.body) {
-          addButton.style.position = 'fixed'
-          addButton.style.left = '12px'
-          addButton.style.bottom = '96px'
-          addButton.style.top = 'auto'
-          addButton.style.zIndex = '9995'
-          document.body.appendChild(addButton)
-        }
-        return
-      }
-      const textarea = composer.querySelector('textarea')
-      const row = textarea?.parentElement ?? null
-      if (row === null) {
-        if (addButton.parentElement !== composer) {
-          addButton.style.position = 'static'
-          addButton.style.zIndex = ''
-          addButton.style.left = ''
-          addButton.style.bottom = ''
-          addButton.style.top = ''
-          composer.append(addButton)
-        }
-        return
-      }
-      if (addButton.parentElement !== row || addButton.nextSibling !== textarea) {
+      const anchor = composer?.querySelector('textarea')?.parentElement ?? composer ?? document.body
+      if (addButton.parentElement !== anchor) {
         addButton.style.position = 'static'
         addButton.style.zIndex = ''
         addButton.style.left = ''
         addButton.style.bottom = ''
         addButton.style.top = ''
-        row.insertBefore(addButton, textarea)
+        // Insert after the pill if present, else as the first element.
+        const pill = document.getElementById('dsh-vision-indicator')
+        if (pill !== null && pill.parentElement === anchor) {
+          pill.after(addButton)
+        } else {
+          anchor.insertBefore(addButton, anchor.firstChild)
+        }
       }
     }
     placeAddButton()
