@@ -284,7 +284,7 @@ window.__ModuleLoader__.load({
 			}
 			const rail = document.getElementById("dsh-vision-ui-rail");
 			if (rail !== null) {
-				if (el.parentElement !== rail) rail.append(el);
+				if (el.parentElement !== rail || rail.firstChild !== el) rail.insertBefore(el, rail.firstChild);
 				return;
 			}
 			if (el.parentElement !== composer) composer.insertBefore(el, composer.firstChild);
@@ -314,14 +314,16 @@ window.__ModuleLoader__.load({
 					"background:rgba(28,28,32,.85)",
 					"color:#ddd",
 					"cursor:pointer",
-					"padding:4px 12px",
+					"padding:0 12px",
 					"border-radius:999px",
-					"font:12px/1.4 -apple-system,BlinkMacSystemFont,\"PingFang SC\",sans-serif",
+					"height:30px",
+					"box-sizing:border-box",
+					"font:12px/1 -apple-system,BlinkMacSystemFont,\"PingFang SC\",sans-serif",
 					"box-shadow:0 2px 8px rgba(0,0,0,.2)",
 					"white-space:nowrap",
 					"display:inline-flex",
 					"align-items:center",
-					"margin:4px 6px 0"
+					"justify-content:center"
 				].join(";");
 				const created = el;
 				el.addEventListener("click", () => {
@@ -1028,6 +1030,7 @@ window.__ModuleLoader__.load({
 					"flex:none",
 					"border-radius:8px",
 					"border:1px solid rgba(128,128,128,.4)",
+					"box-sizing:border-box",
 					"background:rgba(28,28,32,.85)",
 					"color:#ddd",
 					"cursor:pointer",
@@ -1036,7 +1039,7 @@ window.__ModuleLoader__.load({
 					"align-items:center",
 					"justify-content:center",
 					"padding:0",
-					"margin:0 6px"
+					"margin:0"
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
@@ -1056,11 +1059,11 @@ window.__ModuleLoader__.load({
 							"justify-content:flex-start",
 							"gap:6px",
 							"flex-wrap:nowrap",
-							"padding:0 12px",
-							"min-height:36px",
+							"padding:4px 12px",
 							"border-bottom:1px solid rgba(128,128,128,.15)",
 							"min-width:0",
-							"overflow:visible"
+							"overflow:visible",
+							"box-sizing:border-box"
 						].join(";");
 						composer.insertBefore(rail, composer.firstChild);
 					}
