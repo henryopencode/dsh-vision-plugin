@@ -683,7 +683,7 @@ function handleFilePaste(originalFetch: typeof fetch, event: ClipboardEvent): vo
   event.preventDefault()
   event.stopPropagation()
   if (!recognizeOn && droppedImages.length > 0) {
-    showUploadChip(`该模型暂不支持识图，已跳过 ${droppedImages.length} 张图片（可粘贴 Word/PDF 文件上传）`)
+    showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可粘贴 Word/PDF 文件上传`)
   }
   void (async () => {
     for (const file of uploadable) {
@@ -713,7 +713,7 @@ function handleFileDrop(originalFetch: typeof fetch, files: FileList | File[]): 
   const droppedImages = all.filter(file => file.type.startsWith('image/'))
   if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return
   if (!recognizeOn && droppedImages.length > 0) {
-    showUploadChip(`该模型暂不支持识图，已跳过 ${droppedImages.length} 张图片（可拖入 Word/PDF 文件上传）`)
+    showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可拖入 Word/PDF 文件上传`)
   }
   void (async () => {
     for (const file of uploadable) {
@@ -868,7 +868,7 @@ export function apply(ctx: ClientContext): void {
       // Recognition is off: don't forward the image (the chat model can't
       // take image input and a big base64 body trips HTTP 413). Replace the
       // image parts with a short notice, keeping the user's text.
-      const note = `【该模型暂不支持识图，已跳过 ${images.length} 张图片】`
+      const note = `【当前模型不支持识图，已跳过 ${images.length} 张图片】`
       const kept: ({ type: 'text'; text: string })[] = texts.trim().length > 0
         ? [{ type: 'text', text: texts.trim() }]
         : []
@@ -992,8 +992,13 @@ export function apply(ctx: ClientContext): void {
     const onDrop = (event: DragEvent): void => {
       const files = Array.from(event.dataTransfer?.files ?? [])
       if (files.length === 0) return
+      // stopImmediatePropagation: DSH registers its own drop listener on the
+      // same document node; stopPropagation alone would not stop it from
+      // treating a document as an image draft and popping a
+      // "仅支持 PNG、JPG、WebP、GIF 格式的图片" error.
       event.preventDefault()
       event.stopPropagation()
+      event.stopImmediatePropagation()
       handleFileDrop(originalFetch, files)
     }
     document.addEventListener('dragover', onDragOver)

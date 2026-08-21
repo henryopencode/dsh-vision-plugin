@@ -584,7 +584,7 @@ window.__ModuleLoader__.load({
 			if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return;
 			event.preventDefault();
 			event.stopPropagation();
-			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`该模型暂不支持识图，已跳过 ${droppedImages.length} 张图片（可粘贴 Word/PDF 文件上传）`);
+			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可粘贴 Word/PDF 文件上传`);
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -608,7 +608,7 @@ window.__ModuleLoader__.load({
 			const uploadable = all.filter((file) => !file.type.startsWith("image/"));
 			const droppedImages = all.filter((file) => file.type.startsWith("image/"));
 			if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return;
-			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`该模型暂不支持识图，已跳过 ${droppedImages.length} 张图片（可拖入 Word/PDF 文件上传）`);
+			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可拖入 Word/PDF 文件上传`);
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -733,7 +733,7 @@ window.__ModuleLoader__.load({
 				const images = content.filter(isImagePart);
 				if (images.length === 0) return originalFetch(input, init);
 				if (!readConfig().recognizeEnabled) {
-					const note = `【该模型暂不支持识图，已跳过 ${images.length} 张图片】`;
+					const note = `【当前模型不支持识图，已跳过 ${images.length} 张图片】`;
 					payload.content = [...texts.trim().length > 0 ? [{
 						type: "text",
 						text: texts.trim()
@@ -844,6 +844,7 @@ window.__ModuleLoader__.load({
 					if (files.length === 0) return;
 					event.preventDefault();
 					event.stopPropagation();
+					event.stopImmediatePropagation();
 					handleFileDrop(originalFetch, files);
 				};
 				document.addEventListener("dragover", onDragOver);
