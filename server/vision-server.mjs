@@ -19,7 +19,15 @@
 // Deploy by inserting into the web profile's cordis.patch.yml:
 //   - id: vision-server
 //     name: ./vision-server.mjs
+import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import sharp from 'sharp'
+
+/** DSH user home (~/.dsh on macOS/Linux, %USERPROFILE%\.dsh on Windows). */
+function dshHomePath(...segments) {
+  return join(process.env.DSH_HOME || join(homedir(), '.dsh'), ...segments)
+}
 
 export const name = 'vision-server'
 export const inject = ['webServer']
@@ -123,6 +131,10 @@ export function apply(ctx, config) {
   const ocrEnabled = config?.ocrEnabled ?? false
   const maxEdge = config?.maxImageEdge ?? 2048
   const perImageTimeoutMs = config?.timeoutMs ?? 240_000
+  const maxUploadBytes = config?.maxUploadBytes ?? 50 * 1024 * 1024
+
+  // upload name -> absolute path, so GET /vision/file/<name> can download.
+  const uploadedFiles = new Map()
 
   // attachmentId -> full ref, so GET /vision/image/<id> can read it back.
   // In-memory: refs vanish on restart, and old message image links degrade
@@ -208,6 +220,67 @@ export function apply(ctx, config) {
         }
         if (ok) warmUpModel(model)
         respond(200, { ok, reason, loaded })
+        return
+      }
+
+      // POST /vision/upload — store a non-image file in the session workspace
+      // when supplied, otherwise in the profile-owned upload directory.
+      if (url === '/vision/upload' && req.method === 'POST') {
+        let parsed
+        try {
+          parsed = JSON.parse(await readBody(req))
+        } catch {
+          respond(400, { error: 'invalid json body' })
+          return
+        }
+        if (typeof parsed?.data !== 'string' || parsed.data.length === 0) {
+          respond(400, { error: 'data required' })
+          return
+        }
+        const decoded = Buffer.from(parsed.data, 'base64')
+        if (decoded.byteLength > maxUploadBytes) {
+          respond(413, { error: `file exceeds ${maxUploadBytes} bytes` })
+          return
+        }
+        const name = typeof parsed.name === 'string' && parsed.name.length > 0
+          ? parsed.name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120)
+          : `upload-${Date.now()}`
+        try {
+          const inWorkspace = typeof parsed.dir === 'string'
+            && (await stat(parsed.dir).then(info => info.isDirectory()).catch(() => false))
+          const uploadsDir = dshHomePath('vision-uploads')
+          if (!inWorkspace) await mkdir(uploadsDir, { recursive: true })
+          const target = join(inWorkspace ? parsed.dir : uploadsDir, name)
+          await writeFile(target, decoded)
+          uploadedFiles.set(name, target)
+          respond(200, { path: target })
+        } catch (error) {
+          respond(500, { error: error?.message ?? String(error) })
+        }
+        return
+      }
+
+      // GET /vision/file/<name> — download an uploaded file (chat links).
+      if (url.startsWith('/vision/file/') && req.method === 'GET') {
+        const name = decodeURIComponent(url.slice('/vision/file/'.length))
+        const path = uploadedFiles.get(name)
+        if (path === undefined) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+          res.end('file not found')
+          return
+        }
+        try {
+          const { readFile } = await import('node:fs/promises')
+          const data = await readFile(path)
+          res.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Disposition': `attachment; filename="${encodeURIComponent(name)}"`,
+          })
+          res.end(data)
+        } catch {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+          res.end('file read failed')
+        }
         return
       }
 

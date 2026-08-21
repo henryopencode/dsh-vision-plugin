@@ -30,6 +30,10 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 export const DEFAULT_CONFIG = {
   /** Master switch. */
   enabled: true,
+  /** Whether pasted images are recognized (needs vision-server + Ollama). */
+  recognizeEnabled: true,
+  /** Whether the 📎 file-upload button is available (needs upload-server). */
+  uploadEnabled: true,
   /** Local vision endpoint (Ollama OpenAI-compatible base URL). */
   baseURL: 'http://127.0.0.1:11434/v1',
   /**
@@ -39,13 +43,6 @@ export const DEFAULT_CONFIG = {
   model: 'qwen2.5vl:3b',
   /** Per-engine recognition timeout (each OCR/vision call). */
   timeoutMs: 120_000,
-  /**
-   * Ollama keep_alive for each recognition call. `-1` keeps the model resident
-   * after recognition, so the next image skips the cold load (the "first one
-   * times out, second one works" symptom). A positive number unloads after
-   * that many idle seconds.
-   */
-  keepAlive: -1,
   /** Upper bound of images recognized in one message. */
   maxImages: 4,
   /**
@@ -287,7 +284,6 @@ async function recognizeViaServer(
         ocrEnabled: config.ocrEnabled,
         maxImageEdge: config.maxImageEdge,
         timeoutMs: config.timeoutMs,
-        keepAlive: config.keepAlive,
         question,
         images: prepared,
       }),
@@ -513,6 +509,191 @@ function removeProgressCard(): void {
   document.getElementById('dsh-vision-progress')?.remove()
 }
 
+/** Uploaded files pending attachment to the next outgoing message. */
+const pendingUploads: { name: string; path: string }[] = []
+
+/**
+ * Render the upload draft bar above the composer: one chip per pending
+ * uploaded file (like the image draft rail), each with a remove button.
+ * Removed when empty.
+ */
+function renderUploadDraft(): void {
+  const existing = document.getElementById('dsh-vision-upload-draft')
+  existing?.remove()
+  if (pendingUploads.length === 0) return
+  const bar = document.createElement('div')
+  bar.id = 'dsh-vision-upload-draft'
+  bar.style.cssText = [
+    'position:fixed', 'z-index:9996', 'display:flex', 'gap:6px', 'flex-wrap:wrap',
+    'max-width:70vw',
+  ].join(';')
+  for (let index = 0; index < pendingUploads.length; index += 1) {
+    const upload = pendingUploads[index]!
+    const chip = document.createElement('span')
+    chip.style.cssText = [
+      'display:inline-flex', 'align-items:center', 'gap:6px',
+      'background:rgba(28,28,32,.92)', 'border:1px solid rgba(128,128,128,.4)',
+      'color:#eee', 'border-radius:999px', 'padding:3px 6px 3px 10px',
+      'font:12px/1.5 -apple-system,"PingFang SC",sans-serif',
+      'max-width:280px', 'overflow:hidden', 'text-overflow:ellipsis', 'white-space:nowrap',
+    ].join(';')
+    chip.textContent = `${upload.name}`
+    const remove = document.createElement('button')
+    remove.textContent = '×'
+    remove.title = '移除'
+    remove.style.cssText = [
+      'border:none', 'background:transparent', 'color:#aaa', 'cursor:pointer',
+      'font:14px/1 sans-serif', 'padding:0 4px',
+    ].join(';')
+    remove.addEventListener('click', () => {
+      pendingUploads.splice(index, 1)
+      renderUploadDraft()
+    })
+    chip.append(remove)
+    bar.append(chip)
+  }
+  document.body.appendChild(bar)
+  // Anchor just above the composer card, left-aligned with it.
+  const composer = document.querySelector('[data-composer-card]')
+  if (composer !== null) {
+    const rect = composer.getBoundingClientRect()
+    bar.style.left = `${rect.left + 12}px`
+    bar.style.top = `${Math.max(4, rect.top - bar.offsetHeight - 10)}px`
+  } else {
+    bar.style.left = '50%'
+    bar.style.top = '60px'
+    bar.style.transform = 'translateX(-50%)'
+  }
+}
+
+/**
+ * Resolve the most recently active session's working directory via the
+ * host RPC, so uploaded files land inside the workspace the user is talking
+ * in (a project-local copy the agent can open with its file tools).
+ * @param originalFetch - the unpatched global fetch.
+ * @returns the cwd, or undefined when it cannot be resolved.
+ */
+async function resolveSessionCwd(originalFetch: typeof fetch): Promise<string | undefined> {
+  try {
+    const response = await originalFetch('/api/session.list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId: `vision-cwd-${Date.now()}`,
+        method: 'session.list',
+        payload: {},
+      }),
+    })
+    if (!response.ok) return undefined
+    const payload = await response.json() as { result?: { value?: { items?: { cwd?: string; updatedAt?: number }[] } } }
+    const items = payload.result?.value?.items ?? []
+    let best: string | undefined
+    let bestAt = -1
+    for (const item of items) {
+      const at = item.updatedAt ?? 0
+      if (at >= bestAt && typeof item.cwd === 'string' && item.cwd.length > 0) {
+        best = item.cwd
+        bestAt = at
+      }
+    }
+    return best
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Upload an arbitrary file (Word/PDF/…) to the server so the agent can
+ * process it; the path rides along with the next sent message as text.
+ * @param originalFetch - the unpatched global fetch.
+ * @param file - the file to upload.
+ * @returns the server-side absolute path.
+ */
+async function uploadFile(originalFetch: typeof fetch, file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  const chunk = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk))
+  }
+  const dir = await resolveSessionCwd(originalFetch)
+  const response = await originalFetch('/vision/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: file.name,
+      data: btoa(binary),
+      ...(dir === undefined ? {} : { dir }),
+    }),
+  })
+  if (!response.ok) throw new Error(`上传失败 HTTP ${response.status}`)
+  const payload = await response.json() as { path?: string }
+  if (typeof payload.path !== 'string') throw new Error('上传失败：服务端未返回路径')
+  pendingUploads.push({ name: file.name, path: payload.path })
+  renderUploadDraft()
+  return payload.path
+}
+
+/**
+ * Upload every non-image file from a paste event (Finder copy → Cmd+V in the
+ * composer). The InputBar's own paste handler only accepts images, so we
+ * intercept non-image files here, upload them, and let the next message carry
+ * their server paths. Images pass through untouched (recognition path).
+ * @param originalFetch - the unpatched global fetch.
+ * @param event - the paste event being handled.
+ */
+function handleFilePaste(originalFetch: typeof fetch, event: ClipboardEvent): void {
+  const files = Array.from(event.clipboardData?.items ?? [])
+    .filter(item => item.kind === 'file')
+    .map(item => item.getAsFile())
+    .filter((file): file is File => file !== null)
+  const uploadable = files.filter(file => !file.type.startsWith('image/'))
+  if (uploadable.length === 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  void (async () => {
+    for (const file of uploadable) {
+      try {
+        await uploadFile(originalFetch, file)
+        // The upload draft bar already shows the file; no toast needed.
+      } catch (error) {
+        showUploadChip(`⚠️ ${file.name} 上传失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  })()
+}
+
+/** Brief confirmation chip for an upload result. */
+function showUploadChip(text: string): void {
+  let chip = document.getElementById('dsh-vision-upload-chip')
+  if (chip === null) {
+    chip = document.createElement('div')
+    chip.id = 'dsh-vision-upload-chip'
+    chip.style.cssText = [
+      'position:fixed', 'z-index:9996', 'background:rgba(28,28,32,.95)',
+      'color:#fff', 'padding:6px 14px', 'border-radius:8px',
+      'font:12px/1.5 -apple-system,"PingFang SC",sans-serif',
+      'box-shadow:0 4px 16px rgba(0,0,0,.3)', 'pointer-events:none',
+      'max-width:70vw', 'overflow:hidden', 'text-overflow:ellipsis', 'white-space:nowrap',
+    ].join(';')
+    document.body.appendChild(chip)
+  }
+  chip.textContent = text
+  const composer = document.querySelector('[data-composer-card]')
+  if (composer !== null) {
+    const rect = composer.getBoundingClientRect()
+    chip.style.left = `${rect.left + rect.width / 2}px`
+    chip.style.top = `${Math.max(4, rect.top - 60)}px`
+    chip.style.transform = 'translateX(-50%)'
+  } else {
+    chip.style.left = '50%'
+    chip.style.top = '76px'
+    chip.style.transform = 'translateX(-50%)'
+  }
+  window.setTimeout(() => { chip?.remove() }, 5000)
+}
+
 /**
  * Browser half: install the fetch interception for the plugin lifetime.
  * @param ctx - client root context.
@@ -584,10 +765,28 @@ export function apply(ctx: ClientContext): void {
     if (payload === undefined) return originalFetch(input, init)
     const content = payload.content
     if (!Array.isArray(content)) return originalFetch(input, init)
+    const texts = content.filter(isTextPart).map(part => part.text ?? '').join('')
+    // Files attached via paste must ride along on ANY outgoing message, even
+    // a pure-text one (no image parts), and the draft bar must clear.
+    const uploadBlock = pendingUploads.splice(0).map(upload =>
+      `${upload.name}`)
+    if (uploadBlock.length > 0) {
+      renderUploadDraft()
+      const note = `\n\n[已上传文件]\n${uploadBlock.join('\n')}`
+      const parts = content.map(part => {
+        if (isTextPart(part)) {
+          const text = part.text ?? ''
+          return { type: 'text' as const, text: `${text}${note}` }
+        }
+        return part
+      })
+      payload.content = parts
+      return originalFetch(input, { ...init, body: JSON.stringify(envelope) })
+    }
     const images = content.filter(isImagePart)
     if (images.length === 0) return originalFetch(input, init)
+    if (!readConfig().recognizeEnabled) return originalFetch(input, init)
 
-    const texts = content.filter(isTextPart).map(part => part.text ?? '').join('')
     const userQuestion = texts.trim().length > 0 ? texts.trim() : undefined
 
     // Fail fast when the local service is down or a model is missing: probe
@@ -653,6 +852,12 @@ export function apply(ctx: ClientContext): void {
     // so the conversation keeps the picture (model sees only the URL text).
     const rewritten: { type: 'text'; text: string }[] = []
     if (texts.trim().length > 0) rewritten.push({ type: 'text', text: texts.trim() })
+    // Uploaded files ride along as clickable links the agent can open.
+    if (pendingUploads.length > 0) {
+      const block = pendingUploads.splice(0).map(upload => `${upload.name}`).join('\n')
+      rewritten.push({ type: 'text', text: `[已上传文件]\n${block}` })
+      renderUploadDraft()
+    }
     for (let index = 0; index < recognized.length; index += 1) {
       const label = images.length > 1 ? `图片 ${index + 1}` : '图片'
       rewritten.push({ type: 'text', text: `【📷 ${label}识别结果】\n${recognized[index]}` })
@@ -678,6 +883,15 @@ export function apply(ctx: ClientContext): void {
   }
 
   window.fetch = patchedFetch
+  if (readConfig().uploadEnabled) {
+    // Intercept non-image file pastes (Finder copy → Cmd+V) for upload.
+    // Capture phase: run before the composer's own paste handler.
+    const onPaste = (event: ClipboardEvent): void => handleFilePaste(originalFetch, event)
+    document.addEventListener('paste', onPaste, { capture: true })
+    ctx.effect(() => () => {
+      document.removeEventListener('paste', onPaste, { capture: true })
+    })
+  }
   ctx.effect(() => () => {
     if (window.fetch === patchedFetch) window.fetch = originalFetch
     const pill = document.getElementById('dsh-vision-indicator')
@@ -686,5 +900,6 @@ export function apply(ctx: ClientContext): void {
       if (Number.isFinite(ticker) && ticker > 0) window.clearInterval(ticker)
       pill.remove()
     }
+    document.getElementById('dsh-vision-upload-chip')?.remove()
   })
 }

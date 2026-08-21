@@ -9,6 +9,10 @@ window.__ModuleLoader__.load({
 		const DEFAULT_CONFIG = {
 			/** Master switch. */
 			enabled: true,
+			/** Whether pasted images are recognized (needs vision-server + Ollama). */
+			recognizeEnabled: true,
+			/** Whether the 📎 file-upload button is available (needs upload-server). */
+			uploadEnabled: true,
 			/** Local vision endpoint (Ollama OpenAI-compatible base URL). */
 			baseURL: "http://127.0.0.1:11434/v1",
 			/**
@@ -406,6 +410,202 @@ window.__ModuleLoader__.load({
 		function removeProgressCard() {
 			document.getElementById("dsh-vision-progress")?.remove();
 		}
+		/** Uploaded files pending attachment to the next outgoing message. */
+		const pendingUploads = [];
+		/**
+		* Render the upload draft bar above the composer: one chip per pending
+		* uploaded file (like the image draft rail), each with a remove button.
+		* Removed when empty.
+		*/
+		function renderUploadDraft() {
+			document.getElementById("dsh-vision-upload-draft")?.remove();
+			if (pendingUploads.length === 0) return;
+			const bar = document.createElement("div");
+			bar.id = "dsh-vision-upload-draft";
+			bar.style.cssText = [
+				"position:fixed",
+				"z-index:9996",
+				"display:flex",
+				"gap:6px",
+				"flex-wrap:wrap",
+				"max-width:70vw"
+			].join(";");
+			for (let index = 0; index < pendingUploads.length; index += 1) {
+				const upload = pendingUploads[index];
+				const chip = document.createElement("span");
+				chip.style.cssText = [
+					"display:inline-flex",
+					"align-items:center",
+					"gap:6px",
+					"background:rgba(28,28,32,.92)",
+					"border:1px solid rgba(128,128,128,.4)",
+					"color:#eee",
+					"border-radius:999px",
+					"padding:3px 6px 3px 10px",
+					"font:12px/1.5 -apple-system,\"PingFang SC\",sans-serif",
+					"max-width:280px",
+					"overflow:hidden",
+					"text-overflow:ellipsis",
+					"white-space:nowrap"
+				].join(";");
+				chip.textContent = `${upload.name}`;
+				const remove = document.createElement("button");
+				remove.textContent = "×";
+				remove.title = "移除";
+				remove.style.cssText = [
+					"border:none",
+					"background:transparent",
+					"color:#aaa",
+					"cursor:pointer",
+					"font:14px/1 sans-serif",
+					"padding:0 4px"
+				].join(";");
+				remove.addEventListener("click", () => {
+					pendingUploads.splice(index, 1);
+					renderUploadDraft();
+				});
+				chip.append(remove);
+				bar.append(chip);
+			}
+			document.body.appendChild(bar);
+			const composer = document.querySelector("[data-composer-card]");
+			if (composer !== null) {
+				const rect = composer.getBoundingClientRect();
+				bar.style.left = `${rect.left + 12}px`;
+				bar.style.top = `${Math.max(4, rect.top - bar.offsetHeight - 10)}px`;
+			} else {
+				bar.style.left = "50%";
+				bar.style.top = "60px";
+				bar.style.transform = "translateX(-50%)";
+			}
+		}
+		/**
+		* Resolve the most recently active session's working directory via the
+		* host RPC, so uploaded files land inside the workspace the user is talking
+		* in (a project-local copy the agent can open with its file tools).
+		* @param originalFetch - the unpatched global fetch.
+		* @returns the cwd, or undefined when it cannot be resolved.
+		*/
+		async function resolveSessionCwd(originalFetch) {
+			try {
+				const response = await originalFetch("/api/session.list", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						type: "client-request",
+						rpcId: `vision-cwd-${Date.now()}`,
+						method: "session.list",
+						payload: {}
+					})
+				});
+				if (!response.ok) return void 0;
+				const items = (await response.json()).result?.value?.items ?? [];
+				let best;
+				let bestAt = -1;
+				for (const item of items) {
+					const at = item.updatedAt ?? 0;
+					if (at >= bestAt && typeof item.cwd === "string" && item.cwd.length > 0) {
+						best = item.cwd;
+						bestAt = at;
+					}
+				}
+				return best;
+			} catch {
+				return;
+			}
+		}
+		/**
+		* Upload an arbitrary file (Word/PDF/…) to the server so the agent can
+		* process it; the path rides along with the next sent message as text.
+		* @param originalFetch - the unpatched global fetch.
+		* @param file - the file to upload.
+		* @returns the server-side absolute path.
+		*/
+		async function uploadFile(originalFetch, file) {
+			const bytes = new Uint8Array(await file.arrayBuffer());
+			let binary = "";
+			const chunk = 32768;
+			for (let offset = 0; offset < bytes.length; offset += chunk) binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+			const dir = await resolveSessionCwd(originalFetch);
+			const response = await originalFetch("/vision/upload", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					name: file.name,
+					data: btoa(binary),
+					...dir === void 0 ? {} : { dir }
+				})
+			});
+			if (!response.ok) throw new Error(`上传失败 HTTP ${response.status}`);
+			const payload = await response.json();
+			if (typeof payload.path !== "string") throw new Error("上传失败：服务端未返回路径");
+			pendingUploads.push({
+				name: file.name,
+				path: payload.path
+			});
+			renderUploadDraft();
+			return payload.path;
+		}
+		/**
+		* Upload every non-image file from a paste event (Finder copy → Cmd+V in the
+		* composer). The InputBar's own paste handler only accepts images, so we
+		* intercept non-image files here, upload them, and let the next message carry
+		* their server paths. Images pass through untouched (recognition path).
+		* @param originalFetch - the unpatched global fetch.
+		* @param event - the paste event being handled.
+		*/
+		function handleFilePaste(originalFetch, event) {
+			const uploadable = Array.from(event.clipboardData?.items ?? []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file) => file !== null).filter((file) => !file.type.startsWith("image/"));
+			if (uploadable.length === 0) return;
+			event.preventDefault();
+			event.stopPropagation();
+			(async () => {
+				for (const file of uploadable) try {
+					await uploadFile(originalFetch, file);
+				} catch (error) {
+					showUploadChip(`⚠️ ${file.name} 上传失败：${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}
+		/** Brief confirmation chip for an upload result. */
+		function showUploadChip(text) {
+			let chip = document.getElementById("dsh-vision-upload-chip");
+			if (chip === null) {
+				chip = document.createElement("div");
+				chip.id = "dsh-vision-upload-chip";
+				chip.style.cssText = [
+					"position:fixed",
+					"z-index:9996",
+					"background:rgba(28,28,32,.95)",
+					"color:#fff",
+					"padding:6px 14px",
+					"border-radius:8px",
+					"font:12px/1.5 -apple-system,\"PingFang SC\",sans-serif",
+					"box-shadow:0 4px 16px rgba(0,0,0,.3)",
+					"pointer-events:none",
+					"max-width:70vw",
+					"overflow:hidden",
+					"text-overflow:ellipsis",
+					"white-space:nowrap"
+				].join(";");
+				document.body.appendChild(chip);
+			}
+			chip.textContent = text;
+			const composer = document.querySelector("[data-composer-card]");
+			if (composer !== null) {
+				const rect = composer.getBoundingClientRect();
+				chip.style.left = `${rect.left + rect.width / 2}px`;
+				chip.style.top = `${Math.max(4, rect.top - 60)}px`;
+				chip.style.transform = "translateX(-50%)";
+			} else {
+				chip.style.left = "50%";
+				chip.style.top = "76px";
+				chip.style.transform = "translateX(-50%)";
+			}
+			window.setTimeout(() => {
+				chip?.remove();
+			}, 5e3);
+		}
 		/**
 		* Browser half: install the fetch interception for the plugin lifetime.
 		* @param ctx - client root context.
@@ -459,9 +659,26 @@ window.__ModuleLoader__.load({
 				if (payload === void 0) return originalFetch(input, init);
 				const content = payload.content;
 				if (!Array.isArray(content)) return originalFetch(input, init);
+				const texts = content.filter(isTextPart).map((part) => part.text ?? "").join("");
+				const uploadBlock = pendingUploads.splice(0).map((upload) => `${upload.name}`);
+				if (uploadBlock.length > 0) {
+					renderUploadDraft();
+					const note = `\n\n[已上传文件]\n${uploadBlock.join("\n")}`;
+					payload.content = content.map((part) => {
+						if (isTextPart(part)) return {
+							type: "text",
+							text: `${part.text ?? ""}${note}`
+						};
+						return part;
+					});
+					return originalFetch(input, {
+						...init,
+						body: JSON.stringify(envelope)
+					});
+				}
 				const images = content.filter(isImagePart);
 				if (images.length === 0) return originalFetch(input, init);
-				const texts = content.filter(isTextPart).map((part) => part.text ?? "").join("");
+				if (!readConfig().recognizeEnabled) return originalFetch(input, init);
 				const userQuestion = texts.trim().length > 0 ? texts.trim() : void 0;
 				const probe = await probeModels(originalFetch, config);
 				if (!probe.ok) {
@@ -512,6 +729,14 @@ window.__ModuleLoader__.load({
 					type: "text",
 					text: texts.trim()
 				});
+				if (pendingUploads.length > 0) {
+					const block = pendingUploads.splice(0).map((upload) => `${upload.name}`).join("\n");
+					rewritten.push({
+						type: "text",
+						text: `[已上传文件]\n${block}`
+					});
+					renderUploadDraft();
+				}
 				for (let index = 0; index < recognized.length; index += 1) {
 					const label = images.length > 1 ? `图片 ${index + 1}` : "图片";
 					rewritten.push({
@@ -540,6 +765,13 @@ window.__ModuleLoader__.load({
 				});
 			};
 			window.fetch = patchedFetch;
+			if (readConfig().uploadEnabled) {
+				const onPaste = (event) => handleFilePaste(originalFetch, event);
+				document.addEventListener("paste", onPaste, { capture: true });
+				ctx.effect(() => () => {
+					document.removeEventListener("paste", onPaste, { capture: true });
+				});
+			}
 			ctx.effect(() => () => {
 				if (window.fetch === patchedFetch) window.fetch = originalFetch;
 				const pill = document.getElementById("dsh-vision-indicator");
@@ -548,6 +780,7 @@ window.__ModuleLoader__.load({
 					if (Number.isFinite(ticker) && ticker > 0) window.clearInterval(ticker);
 					pill.remove();
 				}
+				document.getElementById("dsh-vision-upload-chip")?.remove();
 			});
 		}
 		//#endregion
