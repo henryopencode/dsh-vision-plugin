@@ -22,6 +22,12 @@ window.__ModuleLoader__.load({
 			*/
 			apiKey: "",
 			/**
+			* Whether the user explicitly saved endpoint settings (baseURL/apiKey) in
+			* the dialog. Only then does the browser send them per-request, overriding
+			* the server's own patch config; otherwise the server config is used.
+			*/
+			overrideEndpoint: false,
+			/**
 			* Vision model to ask. qwen2.5vl:3b is the fast default; switch to
 			* qwen3-vl:4b when dense small-text accuracy matters more than speed.
 			*/
@@ -204,8 +210,10 @@ window.__ModuleLoader__.load({
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
 						model: config.model,
-						baseURL: config.baseURL,
-						apiKey: config.apiKey,
+						...config.overrideEndpoint ? {
+							baseURL: config.baseURL,
+							apiKey: config.apiKey
+						} : {},
 						ocrModel: config.ocrModel,
 						ocrEnabled: config.ocrEnabled,
 						maxImageEdge: config.maxImageEdge,
@@ -307,7 +315,7 @@ window.__ModuleLoader__.load({
 		function openVisionSettings() {
 			document.getElementById("dsh-vision-settings")?.remove();
 			const config = readConfig();
-			const isRemote = config.apiKey !== void 0 && config.apiKey !== "";
+			const isRemote = config.apiKey !== void 0 && config.apiKey !== "" || !/^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(config.baseURL);
 			const overlay = document.createElement("div");
 			overlay.id = "dsh-vision-settings";
 			overlay.style.cssText = [
@@ -397,6 +405,26 @@ window.__ModuleLoader__.load({
 			};
 			baseURLInput.addEventListener("input", updateMode);
 			updateMode();
+			if (!config.overrideEndpoint) {
+				const originalFetch = window.fetch.bind(window);
+				(async () => {
+					try {
+						const response = await originalFetch("/vision/config", {
+							method: "GET",
+							headers: { Accept: "application/json" }
+						});
+						if (!response.ok) return;
+						const payload = await response.json();
+						if (typeof payload.model === "string" && payload.model.length > 0) modelInput.value = payload.model;
+						if (typeof payload.baseURL === "string" && payload.baseURL.length > 0) baseURLInput.value = payload.baseURL;
+						if (payload.apiKeySet === true) {
+							keyRow.style.display = "block";
+							modeLine.textContent = "当前：远程 API（Bearer 认证）";
+							apiKeyInput.placeholder = "服务器已配置 Key（留空则沿用服务器配置）";
+						}
+					} catch {}
+				})();
+			}
 			const buttons = document.createElement("div");
 			buttons.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:18px;";
 			const btn = (text, primary) => {
@@ -421,7 +449,8 @@ window.__ModuleLoader__.load({
 					...config,
 					model: modelInput.value.trim() || config.model,
 					baseURL: baseURLInput.value.trim() || config.baseURL,
-					apiKey: apiKeyInput.value.trim()
+					apiKey: apiKeyInput.value.trim(),
+					overrideEndpoint: true
 				};
 				try {
 					window.localStorage.setItem(CONFIG_KEY, JSON.stringify(next));

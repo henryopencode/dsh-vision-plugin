@@ -237,6 +237,24 @@ export function apply(ctx, config) {
       }
       const url = (req.url ?? '').split('?')[0]
 
+      // GET /vision/config — the server's effective recognition config, so
+      // the browser settings dialog can show what actually runs (local
+      // Ollama vs remote provider). apiKey is masked (only last 4 shown).
+      if (url === '/vision/config' && req.method === 'GET') {
+        const maskKey = (key) => {
+          if (typeof key !== 'string' || key === '') return ''
+          return key.length <= 4 ? '****' : `****${key.slice(-4)}`
+        }
+        respond(200, {
+          model,
+          baseURL,
+          apiKey: maskKey(apiKey),
+          apiKeySet: typeof apiKey === 'string' && apiKey !== '',
+          ocrEnabled,
+        })
+        return
+      }
+
       // GET /vision/probe — same-origin health check that also warms the
       // model. Returns which models are installed and whether they are loaded.
       if (url === '/vision/probe' && req.method === 'GET') {

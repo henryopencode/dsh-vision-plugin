@@ -43,6 +43,12 @@ export const DEFAULT_CONFIG = {
    */
   apiKey: '',
   /**
+   * Whether the user explicitly saved endpoint settings (baseURL/apiKey) in
+   * the dialog. Only then does the browser send them per-request, overriding
+   * the server's own patch config; otherwise the server config is used.
+   */
+  overrideEndpoint: false,
+  /**
    * Vision model to ask. qwen2.5vl:3b is the fast default; switch to
    * qwen3-vl:4b when dense small-text accuracy matters more than speed.
    */
@@ -287,8 +293,11 @@ async function recognizeViaServer(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: config.model,
-        baseURL: config.baseURL,
-        apiKey: config.apiKey,
+        // Only send endpoint overrides when the user explicitly saved them;
+        // otherwise the server's own patch config is used.
+        ...(config.overrideEndpoint
+          ? { baseURL: config.baseURL, apiKey: config.apiKey }
+          : {}),
         ocrModel: config.ocrModel,
         ocrEnabled: config.ocrEnabled,
         maxImageEdge: config.maxImageEdge,
@@ -415,7 +424,8 @@ function openVisionSettings(): void {
   existing?.remove()
 
   const config = readConfig()
-  const isRemote = config.apiKey !== undefined && config.apiKey !== ''
+  const isRemote = (config.apiKey !== undefined && config.apiKey !== '')
+    || !/^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(config.baseURL)
 
   const overlay = document.createElement('div')
   overlay.id = 'dsh-vision-settings'
@@ -498,6 +508,31 @@ function openVisionSettings(): void {
   baseURLInput.addEventListener('input', updateMode)
   updateMode()
 
+  // Unless the user already overrode the endpoint, show the server's actual
+  // effective config (from /vision/config) instead of local defaults — e.g. a
+  // remote Zhipu setup configured in the server patch must appear as remote.
+  if (!config.overrideEndpoint) {
+    const originalFetch = window.fetch.bind(window)
+    void (async () => {
+      try {
+        const response = await originalFetch('/vision/config', { method: 'GET', headers: { Accept: 'application/json' } })
+        if (!response.ok) return
+        const payload = await response.json() as { model?: string; baseURL?: string; apiKeySet?: boolean }
+        if (typeof payload.model === 'string' && payload.model.length > 0) modelInput.value = payload.model
+        if (typeof payload.baseURL === 'string' && payload.baseURL.length > 0) {
+          baseURLInput.value = payload.baseURL
+        }
+        if (payload.apiKeySet === true) {
+          keyRow.style.display = 'block'
+          modeLine.textContent = '当前：远程 API（Bearer 认证）'
+          apiKeyInput.placeholder = '服务器已配置 Key（留空则沿用服务器配置）'
+        }
+      } catch {
+        // Server config unreachable: keep local defaults.
+      }
+    })()
+  }
+
   const buttons = document.createElement('div')
   buttons.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:18px;'
 
@@ -526,6 +561,7 @@ function openVisionSettings(): void {
       model: modelInput.value.trim() || config.model,
       baseURL: baseURLInput.value.trim() || config.baseURL,
       apiKey: apiKeyInput.value.trim(),
+      overrideEndpoint: true,
     }
     try {
       window.localStorage.setItem(CONFIG_KEY, JSON.stringify(next))
