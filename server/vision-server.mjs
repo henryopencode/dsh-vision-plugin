@@ -54,13 +54,13 @@ function readBody(req) {
 }
 
 /** One chat-completion call against the local OpenAI-compatible endpoint. */
-async function chatCompletion(baseURL, model, messages, maxTokens, signal) {
+async function chatCompletion(baseURL, model, messages, maxTokens, signal, numCtx = 32768) {
   const response = await fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      num_ctx: 32768,
+      num_ctx: numCtx,
       temperature: 0,
       messages,
       max_tokens: maxTokens,
@@ -132,6 +132,10 @@ export function apply(ctx, config) {
   const maxEdge = config?.maxImageEdge ?? 2048
   const perImageTimeoutMs = config?.timeoutMs ?? 240_000
   const maxUploadBytes = config?.maxUploadBytes ?? 50 * 1024 * 1024
+  // KV-cache context window. Small servers (4 GB RAM) must keep this low:
+  // a big num_ctx (32768) makes Ollama allocate a huge KV cache and the
+  // model load gets OOM-killed. 4096 fits recognition prompts comfortably.
+  const numCtx = config?.numCtx ?? 32768
 
   // upload name -> absolute path, so GET /vision/file/<name> can download.
   const uploadedFiles = new Map()
@@ -426,7 +430,7 @@ export function apply(ctx, config) {
                       { type: 'image_url', image_url: { url: dataUrl } },
                     ],
                   },
-                ], 1500, controller.signal)
+                ], 1500, controller.signal, numCtx)
                 if (useOcr) {
                   const raw = await chatCompletion(baseURL, ocrModel, [
                     {
@@ -436,7 +440,7 @@ export function apply(ctx, config) {
                         { type: 'image_url', image_url: { url: dataUrl } },
                       ],
                     },
-                  ], 2000, controller.signal)
+                  ], 2000, controller.signal, numCtx)
                   const cleaned = cleanOcrText(raw)
                   text = cleaned.length > 0 ? cleaned : undefined
                 }
