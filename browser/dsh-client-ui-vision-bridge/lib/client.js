@@ -1017,7 +1017,9 @@ window.__ModuleLoader__.load({
 					if (input.files !== null && input.files.length > 0) addLocalFiles(originalFetch, input.files);
 					input.value = "";
 				});
+				document.querySelectorAll("#dsh-vision-attach-button").forEach((el) => el.remove());
 				const addButton = document.createElement("button");
+				addButton.id = "dsh-vision-attach-button";
 				addButton.textContent = "📎";
 				addButton.title = "添加文件或图片";
 				addButton.style.cssText = [
@@ -1041,6 +1043,9 @@ window.__ModuleLoader__.load({
 				const ensureRail = () => {
 					const composer = document.querySelector("[data-composer-card]");
 					if (composer === null) return null;
+					document.querySelectorAll("#dsh-vision-ui-rail").forEach((el) => {
+						if (el !== document.getElementById("dsh-vision-ui-rail")) el.remove();
+					});
 					let rail = document.getElementById("dsh-vision-ui-rail");
 					if (rail === null) {
 						rail = document.createElement("div");
@@ -1058,6 +1063,9 @@ window.__ModuleLoader__.load({
 					return rail;
 				};
 				const placeAddButton = () => {
+					document.querySelectorAll("#dsh-vision-attach-button").forEach((el) => {
+						if (el !== addButton) el.remove();
+					});
 					const rail = ensureRail();
 					if (rail === null) {
 						if (addButton.parentElement !== document.body) document.body.appendChild(addButton);
