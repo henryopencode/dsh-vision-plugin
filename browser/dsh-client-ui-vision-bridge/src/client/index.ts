@@ -122,6 +122,7 @@ interface PromptEnvelope {
   type?: string
   method?: string
   payload?: {
+    sessionId?: string
     content?: (PromptImagePart | PromptTextPart | Record<string, unknown>)[]
   }
 }
@@ -435,7 +436,7 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
  * @param images - image parts (first one is previewed).
  * @param stage - current stage text.
  */
-function showProgressCard(images: PromptImagePart[], stage: string): void {
+function showProgressCard(images: PromptImagePart[], stage: string, sessionId: string | undefined): void {
   let card = document.getElementById('dsh-vision-progress')
   if (card === null) {
     card = document.createElement('div')
@@ -469,6 +470,11 @@ function showProgressCard(images: PromptImagePart[], stage: string): void {
     card.append(frame)
     document.body.appendChild(card)
   }
+  // This card belongs to the session that initiated recognition. The
+  // visibility watchdog below hides it while the user views a different
+  // session, and brings it back when they return — recognition itself keeps
+  // running in the background either way.
+  card.dataset.session = sessionId ?? ''
   const overlay = document.getElementById('dsh-vision-progress-overlay')
   if (overlay !== null) overlay.textContent = `📷 ${stage}`
   // Anchor above the composer card, centered.
@@ -483,21 +489,19 @@ function showProgressCard(images: PromptImagePart[], stage: string): void {
     card.style.bottom = '96px'
     card.style.transform = 'translateX(-50%)'
   }
-  // Session switch: the composer card is re-rendered (its DOM node is
-  // replaced), so a detached anchor means the user left this session — drop
-  // the stale progress card. Recognition continues in the background; its
-  // completion path already tolerates a missing card.
-  if (composer !== null) {
-    const anchor = composer
-    if (card.dataset.watch === undefined) {
-      card.dataset.watch = String(window.setInterval(() => {
-        const live = document.getElementById('dsh-vision-progress')
-        if (live === null) return
-        if (!anchor.isConnected) {
-          removeProgressCard()
-        }
-      }, 500))
-    }
+  // Per-session visibility: hide the card while the user is in another
+  // session, show it again when they come back. Recognition is not cancelled.
+  if (card.dataset.watch === undefined) {
+    card.dataset.watch = String(window.setInterval(() => {
+      const live = document.getElementById('dsh-vision-progress')
+      if (live === null) return
+      const owner = live.dataset.session
+      // Only hide when we can positively identify both sides; with no
+      // session ids available keep the card visible.
+      if (owner !== undefined && owner !== '' && activeSessionId !== undefined && activeSessionId !== '') {
+        live.style.display = activeSessionId === owner ? '' : 'none'
+      }
+    }, 400))
   }
 }
 
@@ -512,6 +516,13 @@ function removeProgressCard(): void {
 
 /** Uploaded files pending attachment to the next outgoing message. */
 const pendingUploads: { name: string; path: string }[] = []
+
+/**
+ * The session the user is currently viewing, updated from session.* RPC
+ * payloads. The progress card hides while a different session is active and
+ * reappears when the user returns to the initiating session.
+ */
+let activeSessionId: string | undefined
 
 /**
  * Render the upload draft bar above the composer: one chip per pending
@@ -749,6 +760,21 @@ export function apply(ctx: ClientContext): void {
     } catch {
       return originalFetch(input, init)
     }
+
+    // Track which session the user is currently viewing: switching sessions
+    // issues session.* RPCs (session.history, session.read, …) carrying the
+    // target session id. The progress card uses this to stay with its own
+    // session — hidden while the user is elsewhere, restored on return.
+    if (pathname.startsWith('/api/session.') && typeof init?.body === 'string') {
+      try {
+        const envelope = JSON.parse(init.body) as PromptEnvelope
+        const sid = envelope.payload?.sessionId
+        if (typeof sid === 'string' && sid.length > 0) activeSessionId = sid
+      } catch {
+        // Not JSON; ignore.
+      }
+    }
+
     if (!pathname.endsWith('/api/session.prompt')) return originalFetch(input, init)
 
     // The RPC body is JSON text; anything else passes through untouched.
@@ -810,7 +836,7 @@ export function apply(ctx: ClientContext): void {
     // Preferred path: one same-origin call to the vision-server plugin, which
     // downscales and runs the models on the reliable server network stack.
     const started = Date.now()
-    showProgressCard(targetImages, '正在识别…')
+    showProgressCard(targetImages, '正在识别…', payload.sessionId)
     // The pill stays simple ("⏳ 识别中"); stage details live on the
     // sending progress card only — showing both was redundant.
     updateStatusIndicator('busy', undefined, toggleBridge)

@@ -331,7 +331,7 @@ window.__ModuleLoader__.load({
 		* @param images - image parts (first one is previewed).
 		* @param stage - current stage text.
 		*/
-		function showProgressCard(images, stage) {
+		function showProgressCard(images, stage, sessionId) {
 			let card = document.getElementById("dsh-vision-progress");
 			if (card === null) {
 				card = document.createElement("div");
@@ -376,6 +376,7 @@ window.__ModuleLoader__.load({
 				card.append(frame);
 				document.body.appendChild(card);
 			}
+			card.dataset.session = sessionId ?? "";
 			const overlay = document.getElementById("dsh-vision-progress-overlay");
 			if (overlay !== null) overlay.textContent = `📷 ${stage}`;
 			const composer = document.querySelector("[data-composer-card]");
@@ -389,13 +390,12 @@ window.__ModuleLoader__.load({
 				card.style.bottom = "96px";
 				card.style.transform = "translateX(-50%)";
 			}
-			if (composer !== null) {
-				const anchor = composer;
-				if (card.dataset.watch === void 0) card.dataset.watch = String(window.setInterval(() => {
-					if (document.getElementById("dsh-vision-progress") === null) return;
-					if (!anchor.isConnected) removeProgressCard();
-				}, 500));
-			}
+			if (card.dataset.watch === void 0) card.dataset.watch = String(window.setInterval(() => {
+				const live = document.getElementById("dsh-vision-progress");
+				if (live === null) return;
+				const owner = live.dataset.session;
+				if (owner !== void 0 && owner !== "" && activeSessionId !== void 0 && activeSessionId !== "") live.style.display = activeSessionId === owner ? "" : "none";
+			}, 400));
 		}
 		/** Remove the "sending" progress card. */
 		function removeProgressCard() {
@@ -407,6 +407,12 @@ window.__ModuleLoader__.load({
 		}
 		/** Uploaded files pending attachment to the next outgoing message. */
 		const pendingUploads = [];
+		/**
+		* The session the user is currently viewing, updated from session.* RPC
+		* payloads. The progress card hides while a different session is active and
+		* reappears when the user returns to the initiating session.
+		*/
+		let activeSessionId;
 		/**
 		* Render the upload draft bar above the composer: one chip per pending
 		* uploaded file (like the image draft rail), each with a remove button.
@@ -641,6 +647,10 @@ window.__ModuleLoader__.load({
 				} catch {
 					return originalFetch(input, init);
 				}
+				if (pathname.startsWith("/api/session.") && typeof init?.body === "string") try {
+					const sid = JSON.parse(init.body).payload?.sessionId;
+					if (typeof sid === "string" && sid.length > 0) activeSessionId = sid;
+				} catch {}
 				if (!pathname.endsWith("/api/session.prompt")) return originalFetch(input, init);
 				if (typeof init?.body !== "string") return originalFetch(input, init);
 				let envelope;
@@ -695,7 +705,7 @@ window.__ModuleLoader__.load({
 				const recognized = [];
 				const targetImages = images.slice(0, config.maxImages);
 				const started = Date.now();
-				showProgressCard(targetImages, "正在识别…");
+				showProgressCard(targetImages, "正在识别…", payload.sessionId);
 				updateStatusIndicator("busy", void 0, toggleBridge);
 				const stageOf = (stage) => {
 					const overlay = document.getElementById("dsh-vision-progress-overlay");
