@@ -587,6 +587,23 @@ window.__ModuleLoader__.load({
 				}
 			})();
 		}
+		/**
+		* Upload every non-image file dropped onto the page (drag & drop into the
+		* conversation). Images pass through untouched (recognition path).
+		* @param originalFetch - the unpatched global fetch.
+		* @param files - the dropped files.
+		*/
+		function handleFileDrop(originalFetch, files) {
+			const uploadable = Array.from(files).filter((file) => !file.type.startsWith("image/"));
+			if (uploadable.length === 0) return;
+			(async () => {
+				for (const file of uploadable) try {
+					await uploadFile(originalFetch, file);
+				} catch (error) {
+					showUploadChip(`⚠️ ${file.name} 上传失败：${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}
 		/** Brief confirmation chip for an upload result. */
 		function showUploadChip(text) {
 			let chip = document.getElementById("dsh-vision-upload-chip");
@@ -806,8 +823,23 @@ window.__ModuleLoader__.load({
 			if (readConfig().uploadEnabled) {
 				const onPaste = (event) => handleFilePaste(originalFetch, event);
 				document.addEventListener("paste", onPaste, { capture: true });
+				const onDragOver = (event) => {
+					if (Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files")) event.preventDefault();
+				};
+				const onDrop = (event) => {
+					const files = Array.from(event.dataTransfer?.files ?? []);
+					if (files.some((file) => !file.type.startsWith("image/"))) {
+						event.preventDefault();
+						event.stopPropagation();
+						handleFileDrop(originalFetch, files);
+					}
+				};
+				document.addEventListener("dragover", onDragOver);
+				document.addEventListener("drop", onDrop);
 				ctx.effect(() => () => {
 					document.removeEventListener("paste", onPaste, { capture: true });
+					document.removeEventListener("dragover", onDragOver);
+					document.removeEventListener("drop", onDrop);
 				});
 			}
 			ctx.effect(() => () => {
