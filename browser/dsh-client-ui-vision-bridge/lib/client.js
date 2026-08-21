@@ -332,6 +332,8 @@ window.__ModuleLoader__.load({
 				});
 			}
 			if (state === "busy") {
+				const prevTimer = Number(el.dataset.timer);
+				if (Number.isFinite(prevTimer) && prevTimer > 0) window.clearInterval(prevTimer);
 				el.dataset.busy = "1";
 				const startedAt = Date.now();
 				const tick = () => {
@@ -514,28 +516,6 @@ window.__ModuleLoader__.load({
 			else document.body.appendChild(bar);
 		}
 		/**
-		* DSH's send button is enabled only when the composer input has content. A
-		* picked image lives in our own draft (DSH knows nothing about it), so the
-		* button stays disabled. Inject a zero-width placeholder into the textarea
-		* and fire an input event: DSH sees content → enables send. The placeholder
-		* is stripped from the outgoing message by patchedFetch.
-		*/
-		function enableSendButton() {
-			const composer = document.querySelector("[data-composer-card]");
-			if (composer === null) return;
-			const textarea = composer.querySelector("textarea");
-			if (textarea === null || textarea.readOnly || textarea.disabled) return;
-			const placeholder = "​";
-			if (!textarea.value.includes(placeholder)) {
-				textarea.value = placeholder + textarea.value;
-				textarea.dispatchEvent(new Event("input", { bubbles: true }));
-			}
-		}
-		/** Remove the zero-width send-placeholder from a message text. */
-		function stripSendPlaceholder(text) {
-			return text.replace(/\u200b/g, "").trim();
-		}
-		/**
 		* Handle files chosen via the local "＋" button: images are queued as image
 		* parts for the next message (recognition path); other files are uploaded to
 		* the session workspace (upload path).
@@ -545,13 +525,11 @@ window.__ModuleLoader__.load({
 		function addLocalFiles(originalFetch, files) {
 			const recognizeOn = readConfig().recognizeEnabled;
 			const uploadable = [];
-			let pickedImage = false;
 			for (const file of Array.from(files)) if (file.type.startsWith("image/")) {
 				if (!recognizeOn) {
 					showUploadChip(`当前模型不支持识图，已跳过 ${file.name}`);
 					continue;
 				}
-				pickedImage = true;
 				(async () => {
 					try {
 						const data = await readFileAsBase64(file);
@@ -567,7 +545,6 @@ window.__ModuleLoader__.load({
 					}
 				})();
 			} else uploadable.push(file);
-			if (pickedImage) enableSendButton();
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -670,11 +647,25 @@ window.__ModuleLoader__.load({
 			if (files.length === 0) return;
 			const recognizeOn = readConfig().recognizeEnabled;
 			const uploadable = files.filter((file) => !file.type.startsWith("image/"));
-			const droppedImages = files.filter((file) => file.type.startsWith("image/"));
-			if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return;
+			const pastedImages = files.filter((file) => file.type.startsWith("image/"));
+			if (uploadable.length === 0 && pastedImages.length === 0) return;
 			event.preventDefault();
 			event.stopPropagation();
-			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可粘贴 Word/PDF 文件上传`);
+			if (recognizeOn && pastedImages.length > 0) for (const file of pastedImages) (async () => {
+				try {
+					const data = await readFileAsBase64(file);
+					pendingLocalImages.push({
+						type: "image",
+						mediaType: file.type || "image/png",
+						data,
+						name: file.name
+					});
+					renderLocalImageDraft();
+				} catch {
+					showUploadChip(`⚠️ 无法读取图片 ${file.name}`);
+				}
+			})();
+			if (!recognizeOn && pastedImages.length > 0) showUploadChip(`当前模型不支持识图，已跳过 ${pastedImages.length} 张图片；可粘贴 Word/PDF 文件上传`);
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -697,7 +688,21 @@ window.__ModuleLoader__.load({
 			const recognizeOn = readConfig().recognizeEnabled;
 			const uploadable = all.filter((file) => !file.type.startsWith("image/"));
 			const droppedImages = all.filter((file) => file.type.startsWith("image/"));
-			if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return;
+			if (uploadable.length === 0 && droppedImages.length === 0) return;
+			if (recognizeOn && droppedImages.length > 0) for (const file of droppedImages) (async () => {
+				try {
+					const data = await readFileAsBase64(file);
+					pendingLocalImages.push({
+						type: "image",
+						mediaType: file.type || "image/png",
+						data,
+						name: file.name
+					});
+					renderLocalImageDraft();
+				} catch {
+					showUploadChip(`⚠️ 无法读取图片 ${file.name}`);
+				}
+			})();
 			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可拖入 Word/PDF 文件上传`);
 			(async () => {
 				for (const file of uploadable) try {
@@ -810,7 +815,7 @@ window.__ModuleLoader__.load({
 				}
 				content = content.map((part) => isTextPart(part) ? {
 					type: "text",
-					text: stripSendPlaceholder(part.text ?? "")
+					text: (part.text ?? "").trim()
 				} : part);
 				payload.content = content;
 				const texts = content.filter(isTextPart).map((part) => part.text ?? "").join("");

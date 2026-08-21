@@ -435,6 +435,12 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
   if (state === 'busy') {
     // Recognition in progress: pill shows a live ticking counter and stays
     // non-clickable. The interval is cleared on the next (non-busy) update.
+    // A previous busy interval (from a double 'busy' call) must be cleared
+    // first, else it keeps overwriting the pill text forever.
+    const prevTimer = Number(el.dataset.timer)
+    if (Number.isFinite(prevTimer) && prevTimer > 0) {
+      window.clearInterval(prevTimer)
+    }
     el.dataset.busy = '1'
     const startedAt = Date.now()
     const tick = (): void => {
@@ -600,29 +606,7 @@ function renderLocalImageDraft(): void {
   }
 }
 
-/**
- * DSH's send button is enabled only when the composer input has content. A
- * picked image lives in our own draft (DSH knows nothing about it), so the
- * button stays disabled. Inject a zero-width placeholder into the textarea
- * and fire an input event: DSH sees content → enables send. The placeholder
- * is stripped from the outgoing message by patchedFetch.
- */
-function enableSendButton(): void {
-  const composer = document.querySelector('[data-composer-card]')
-  if (composer === null) return
-  const textarea = composer.querySelector('textarea')
-  if (textarea === null || textarea.readOnly || textarea.disabled) return
-  const placeholder = '\u200b'
-  if (!textarea.value.includes(placeholder)) {
-    textarea.value = placeholder + textarea.value
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-  }
-}
 
-/** Remove the zero-width send-placeholder from a message text. */
-function stripSendPlaceholder(text: string): string {
-  return text.replace(/\u200b/g, '').trim()
-}
 
 /**
  * Handle files chosen via the local "＋" button: images are queued as image
@@ -634,14 +618,12 @@ function stripSendPlaceholder(text: string): string {
 function addLocalFiles(originalFetch: typeof fetch, files: FileList | File[]): void {
   const recognizeOn = readConfig().recognizeEnabled
   const uploadable: File[] = []
-  let pickedImage = false
   for (const file of Array.from(files)) {
     if (file.type.startsWith('image/')) {
       if (!recognizeOn) {
         showUploadChip(`当前模型不支持识图，已跳过 ${file.name}`)
         continue
       }
-      pickedImage = true
       void (async () => {
         try {
           const data = await readFileAsBase64(file)
@@ -660,7 +642,6 @@ function addLocalFiles(originalFetch: typeof fetch, files: FileList | File[]): v
       uploadable.push(file)
     }
   }
-  if (pickedImage) enableSendButton()
   void (async () => {
     for (const file of uploadable) {
       try {
@@ -772,12 +753,33 @@ function handleFilePaste(originalFetch: typeof fetch, event: ClipboardEvent): vo
   if (files.length === 0) return
   const recognizeOn = readConfig().recognizeEnabled
   const uploadable = files.filter(file => !file.type.startsWith('image/'))
-  const droppedImages = files.filter(file => file.type.startsWith('image/'))
-  if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return
+  const pastedImages = files.filter(file => file.type.startsWith('image/'))
+  // Images (recognition on) are intercepted like the "＋" button: they join
+  // our own draft so DSH never sees them as content — the send button stays
+  // disabled until the user types text.
+  if (uploadable.length === 0 && pastedImages.length === 0) return
   event.preventDefault()
   event.stopPropagation()
-  if (!recognizeOn && droppedImages.length > 0) {
-    showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可粘贴 Word/PDF 文件上传`)
+  if (recognizeOn && pastedImages.length > 0) {
+    for (const file of pastedImages) {
+      void (async () => {
+        try {
+          const data = await readFileAsBase64(file)
+          pendingLocalImages.push({
+            type: 'image',
+            mediaType: file.type || 'image/png',
+            data,
+            name: file.name,
+          })
+          renderLocalImageDraft()
+        } catch {
+          showUploadChip(`⚠️ 无法读取图片 ${file.name}`)
+        }
+      })()
+    }
+  }
+  if (!recognizeOn && pastedImages.length > 0) {
+    showUploadChip(`当前模型不支持识图，已跳过 ${pastedImages.length} 张图片；可粘贴 Word/PDF 文件上传`)
   }
   void (async () => {
     for (const file of uploadable) {
@@ -805,7 +807,27 @@ function handleFileDrop(originalFetch: typeof fetch, files: FileList | File[]): 
   const recognizeOn = readConfig().recognizeEnabled
   const uploadable = all.filter(file => !file.type.startsWith('image/'))
   const droppedImages = all.filter(file => file.type.startsWith('image/'))
-  if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return
+  if (uploadable.length === 0 && droppedImages.length === 0) return
+  if (recognizeOn && droppedImages.length > 0) {
+    // Images join our own draft (same as paste / "＋") so DSH never treats
+    // them as content and the send button stays disabled until text input.
+    for (const file of droppedImages) {
+      void (async () => {
+        try {
+          const data = await readFileAsBase64(file)
+          pendingLocalImages.push({
+            type: 'image',
+            mediaType: file.type || 'image/png',
+            data,
+            name: file.name,
+          })
+          renderLocalImageDraft()
+        } catch {
+          showUploadChip(`⚠️ 无法读取图片 ${file.name}`)
+        }
+      })()
+    }
+  }
   if (!recognizeOn && droppedImages.length > 0) {
     showUploadChip(`当前模型不支持识图，已跳过 ${droppedImages.length} 张图片；可拖入 Word/PDF 文件上传`)
   }
@@ -950,7 +972,7 @@ export function apply(ctx: ClientContext): void {
     // Strip the zero-width send-placeholder (used to enable the send button
     // when only an image was picked) from every text part.
     content = content.map(part =>
-      isTextPart(part) ? { type: 'text' as const, text: stripSendPlaceholder(part.text ?? '') } : part)
+      isTextPart(part) ? { type: 'text' as const, text: (part.text ?? '').trim() } : part)
     payload.content = content
 
     const texts = content.filter(isTextPart).map(part => part.text ?? '').join('')
