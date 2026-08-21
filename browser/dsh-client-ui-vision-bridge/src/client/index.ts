@@ -376,7 +376,7 @@ function positionIndicator(el: HTMLElement): void {
   el.style.right = ''
   el.style.bottom = ''
   el.style.transform = ''
-  el.style.margin = '6px 0 0 12px'
+  el.style.margin = '4px 0'
   const composer = document.querySelector('[data-composer-card]')
   if (composer === null) {
     if (el.parentElement !== document.body) document.body.appendChild(el)
@@ -1202,8 +1202,9 @@ export function apply(ctx: ClientContext): void {
         rail = document.createElement('div')
         rail.id = 'dsh-vision-ui-rail'
         rail.style.cssText = [
-          'display:flex', 'align-items:center', 'gap:6px', 'flex-wrap:wrap',
+          'display:flex', 'align-items:center', 'gap:6px', 'flex-wrap:nowrap',
           'padding:0 12px', 'border-bottom:1px solid rgba(128,128,128,.15)',
+          'min-width:0', 'overflow:visible',
         ].join(';')
         composer.insertBefore(rail, composer.firstChild)
       }
