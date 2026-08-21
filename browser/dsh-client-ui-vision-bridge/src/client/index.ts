@@ -1163,7 +1163,7 @@ export function apply(ctx: ClientContext): void {
       'border:1px solid rgba(128,128,128,.4)',
       'background:rgba(28,28,32,.85)', 'color:#ddd', 'cursor:pointer',
       'font:14px/1 sans-serif', 'display:inline-flex', 'align-items:center',
-      'justify-content:center', 'padding:0', 'margin:8px 4px 8px 12px',
+      'justify-content:center', 'padding:0', 'margin:0 6px',
     ].join(';')
     addButton.addEventListener('click', () => input.click())
     document.body.appendChild(addButton)
@@ -1173,29 +1173,52 @@ export function apply(ctx: ClientContext): void {
     const placeAddButton = (): void => {
       const composer = document.querySelector('[data-composer-card]')
       if (composer === null) {
-        addButton.style.position = 'fixed'
-        addButton.style.left = '12px'
-        addButton.style.bottom = '96px'
-        addButton.style.top = 'auto'
-        addButton.style.zIndex = '9995'
+        if (addButton.parentElement !== document.body) {
+          addButton.style.position = 'fixed'
+          addButton.style.left = '12px'
+          addButton.style.bottom = '96px'
+          addButton.style.top = 'auto'
+          addButton.style.zIndex = '9995'
+          document.body.appendChild(addButton)
+        }
         return
       }
-      // Insert on the same row as the input: find the textarea's row
-      // container and place the button right before it (left of the text).
-      addButton.style.position = 'static'
-      addButton.style.zIndex = ''
-      addButton.style.left = ''
-      addButton.style.bottom = ''
-      addButton.style.top = ''
       const textarea = composer.querySelector('textarea')
       const row = textarea?.parentElement ?? null
-      if (row !== null) {
-        if (addButton.parentElement !== row) row.insertBefore(addButton, textarea)
-      } else if (addButton.parentElement !== composer) {
-        composer.append(addButton)
+      if (row === null) {
+        if (addButton.parentElement !== composer) {
+          addButton.style.position = 'static'
+          addButton.style.zIndex = ''
+          addButton.style.left = ''
+          addButton.style.bottom = ''
+          addButton.style.top = ''
+          composer.append(addButton)
+        }
+        return
       }
-      return
+      if (addButton.parentElement !== row || addButton.nextSibling !== textarea) {
+        addButton.style.position = 'static'
+        addButton.style.zIndex = ''
+        addButton.style.left = ''
+        addButton.style.bottom = ''
+        addButton.style.top = ''
+        row.insertBefore(addButton, textarea)
+      }
     }
+    placeAddButton()
+    const repositionTimer = window.setInterval(placeAddButton, 400)
+    let rowObserver
+    const watchRow = (): void => {
+      const composer = document.querySelector('[data-composer-card]')
+      const textarea = composer?.querySelector('textarea')
+      const row = textarea?.parentElement ?? null
+      if (row === null) return
+      if (rowObserver !== undefined) rowObserver.disconnect()
+      rowObserver = new MutationObserver(() => placeAddButton())
+      rowObserver.observe(row, { childList: true, subtree: false })
+    }
+    watchRow()
+    const rowWatchTimer = window.setInterval(watchRow, 1000)
 
     // Drag & drop a file onto the page uploads it too. Intercept at the
     // window capture phase (before DSH's own listeners) and stop immediate
@@ -1236,6 +1259,7 @@ export function apply(ctx: ClientContext): void {
       window.removeEventListener('drop', onDrop, { capture: true })
       window.clearInterval(overlayKiller)
       window.clearInterval(repositionTimer)
+      window.clearInterval(rowWatchTimer)
       addButton.remove()
       input.remove()
     })

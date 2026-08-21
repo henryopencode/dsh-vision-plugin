@@ -1020,10 +1020,60 @@ window.__ModuleLoader__.load({
 					"align-items:center",
 					"justify-content:center",
 					"padding:0",
-					"margin:8px 4px 8px 12px"
+					"margin:0 6px"
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
+				const placeAddButton = () => {
+					const composer = document.querySelector("[data-composer-card]");
+					if (composer === null) {
+						if (addButton.parentElement !== document.body) {
+							addButton.style.position = "fixed";
+							addButton.style.left = "12px";
+							addButton.style.bottom = "96px";
+							addButton.style.top = "auto";
+							addButton.style.zIndex = "9995";
+							document.body.appendChild(addButton);
+						}
+						return;
+					}
+					const textarea = composer.querySelector("textarea");
+					const row = textarea?.parentElement ?? null;
+					if (row === null) {
+						if (addButton.parentElement !== composer) {
+							addButton.style.position = "static";
+							addButton.style.zIndex = "";
+							addButton.style.left = "";
+							addButton.style.bottom = "";
+							addButton.style.top = "";
+							composer.append(addButton);
+						}
+						return;
+					}
+					if (addButton.parentElement !== row || addButton.nextSibling !== textarea) {
+						addButton.style.position = "static";
+						addButton.style.zIndex = "";
+						addButton.style.left = "";
+						addButton.style.bottom = "";
+						addButton.style.top = "";
+						row.insertBefore(addButton, textarea);
+					}
+				};
+				placeAddButton();
+				const repositionTimer = window.setInterval(placeAddButton, 400);
+				let rowObserver;
+				const watchRow = () => {
+					const row = (document.querySelector("[data-composer-card]")?.querySelector("textarea"))?.parentElement ?? null;
+					if (row === null) return;
+					if (rowObserver !== void 0) rowObserver.disconnect();
+					rowObserver = new MutationObserver(() => placeAddButton());
+					rowObserver.observe(row, {
+						childList: true,
+						subtree: false
+					});
+				};
+				watchRow();
+				const rowWatchTimer = window.setInterval(watchRow, 1e3);
 				const hasFiles = (event) => Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files");
 				const swallow = (event) => {
 					event.preventDefault();
@@ -1060,6 +1110,7 @@ window.__ModuleLoader__.load({
 					window.removeEventListener("drop", onDrop, { capture: true });
 					window.clearInterval(overlayKiller);
 					window.clearInterval(repositionTimer);
+					window.clearInterval(rowWatchTimer);
 					addButton.remove();
 					input.remove();
 				});
