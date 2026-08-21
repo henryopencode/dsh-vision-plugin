@@ -506,9 +506,10 @@ window.__ModuleLoader__.load({
 			}
 		}
 		/**
-		* Render chips for images picked via the "＋" button, inside the composer
-		* like the upload draft. Each chip shows the image name with a remove
-		* button; cleared when the message goes out.
+		* Render image thumbnails for images picked via the attachment button,
+		* inside the composer like the upload draft. Each thumbnail shows the real
+		* image (base64 preview) with a remove button; cleared when the message goes
+		* out.
 		*/
 		function renderLocalImageDraft() {
 			document.getElementById("dsh-vision-local-image-draft")?.remove();
@@ -517,47 +518,55 @@ window.__ModuleLoader__.load({
 			bar.id = "dsh-vision-local-image-draft";
 			bar.style.cssText = [
 				"display:flex",
-				"gap:6px",
+				"gap:8px",
 				"flex-wrap:wrap",
 				"max-width:70vw",
 				"padding:8px 12px 0"
 			].join(";");
 			for (let index = 0; index < pendingLocalImages.length; index += 1) {
 				const image = pendingLocalImages[index];
-				const chip = document.createElement("span");
-				chip.style.cssText = [
-					"display:inline-flex",
-					"align-items:center",
-					"gap:6px",
-					"background:rgba(28,28,32,.92)",
-					"border:1px solid rgba(128,128,128,.4)",
-					"color:#eee",
-					"border-radius:999px",
-					"padding:3px 6px 3px 10px",
-					"font:12px/1.5 -apple-system,\"PingFang SC\",sans-serif",
-					"max-width:280px",
+				const item = document.createElement("div");
+				item.style.cssText = [
+					"position:relative",
+					"width:72px",
+					"height:72px",
+					"border-radius:8px",
 					"overflow:hidden",
-					"text-overflow:ellipsis",
-					"white-space:nowrap"
+					"border:1px solid rgba(128,128,128,.45)",
+					"background:rgba(0,0,0,.4)",
+					"flex:none"
 				].join(";");
-				chip.textContent = `🖼 ${image.name ?? `图片 ${index + 1}`}`;
+				const img = document.createElement("img");
+				img.style.cssText = "width:100%;height:100%;object-fit:cover;display:block;";
+				img.src = `data:${image.mediaType ?? "image/png"};base64,${image.data ?? ""}`;
+				img.alt = image.name ?? `图片 ${index + 1}`;
+				img.title = image.name ?? `图片 ${index + 1}`;
 				const remove = document.createElement("button");
 				remove.textContent = "×";
 				remove.title = "移除";
 				remove.style.cssText = [
+					"position:absolute",
+					"top:2px",
+					"right:2px",
+					"width:18px",
+					"height:18px",
 					"border:none",
-					"background:transparent",
-					"color:#aaa",
+					"border-radius:50%",
+					"background:rgba(0,0,0,.65)",
+					"color:#fff",
 					"cursor:pointer",
-					"font:14px/1 sans-serif",
-					"padding:0 4px"
+					"font:12px/1 sans-serif",
+					"display:flex",
+					"align-items:center",
+					"justify-content:center",
+					"padding:0"
 				].join(";");
 				remove.addEventListener("click", () => {
 					pendingLocalImages.splice(index, 1);
 					renderLocalImageDraft();
 				});
-				chip.append(remove);
-				bar.append(chip);
+				item.append(img, remove);
+				bar.append(item);
 			}
 			const composer = document.querySelector("[data-composer-card]");
 			if (composer !== null && composer.firstChild !== null) composer.insertBefore(bar, composer.firstChild);
@@ -965,23 +974,23 @@ window.__ModuleLoader__.load({
 					input.value = "";
 				});
 				const addButton = document.createElement("button");
-				addButton.textContent = "＋";
+				addButton.textContent = "📎";
 				addButton.title = "添加文件或图片";
 				addButton.style.cssText = [
-					"width:28px",
-					"height:28px",
+					"width:30px",
+					"height:30px",
 					"flex:none",
-					"border-radius:50%",
+					"border-radius:8px",
 					"border:1px solid rgba(128,128,128,.4)",
 					"background:rgba(28,28,32,.85)",
 					"color:#ddd",
 					"cursor:pointer",
-					"font:16px/1 sans-serif",
+					"font:14px/1 sans-serif",
 					"display:inline-flex",
 					"align-items:center",
 					"justify-content:center",
 					"padding:0",
-					"margin:8px 0 8px 12px"
+					"margin:8px 4px 8px 12px"
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
