@@ -632,7 +632,7 @@ window.__ModuleLoader__.load({
 				} else updateStatusIndicator("disabled", void 0, toggleBridge);
 			};
 			const initial = readConfig();
-			if (!initial.enabled) updateStatusIndicator("disabled", void 0, toggleBridge);
+			if (!initial.enabled || !initial.recognizeEnabled) updateStatusIndicator("disabled", void 0, toggleBridge);
 			else probeModels(originalFetch, initial).then((probe) => {
 				updateStatusIndicator(probe.ok ? "online" : "offline", probe.ok ? void 0 : probe.reason, toggleBridge);
 			});

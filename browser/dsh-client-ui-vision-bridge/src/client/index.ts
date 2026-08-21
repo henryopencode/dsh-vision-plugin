@@ -734,8 +734,10 @@ export function apply(ctx: ClientContext): void {
   }
 
   // Initial indicator state: disabled, or online/offline per a quick probe.
+  // When recognition is disabled there is no pill at all and no probe — the
+  // probe would warm up the model (memory) for a feature that is off.
   const initial = readConfig()
-  if (!initial.enabled) {
+  if (!initial.enabled || !initial.recognizeEnabled) {
     updateStatusIndicator('disabled', undefined, toggleBridge)
   } else {
     void probeModels(originalFetch, initial).then((probe) => {
