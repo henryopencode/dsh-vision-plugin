@@ -408,6 +408,12 @@ window.__ModuleLoader__.load({
 		/** Uploaded files pending attachment to the next outgoing message. */
 		const pendingUploads = [];
 		/**
+		* Images picked via the local "＋" button (not pasted): they ride into the
+		* next outgoing message as image parts, exactly like pasted images, so they
+		* go through the same recognition path.
+		*/
+		const pendingLocalImages = [];
+		/**
 		* The session the user is currently viewing, updated from session.* RPC
 		* payloads. The progress card hides while a different session is active and
 		* reappears when the user returns to the initiating session.
@@ -498,6 +504,115 @@ window.__ModuleLoader__.load({
 					bar.style.transform = "translateX(-50%)";
 				}
 			}
+		}
+		/**
+		* Render chips for images picked via the "＋" button, inside the composer
+		* like the upload draft. Each chip shows the image name with a remove
+		* button; cleared when the message goes out.
+		*/
+		function renderLocalImageDraft() {
+			document.getElementById("dsh-vision-local-image-draft")?.remove();
+			if (pendingLocalImages.length === 0) return;
+			const bar = document.createElement("div");
+			bar.id = "dsh-vision-local-image-draft";
+			bar.style.cssText = [
+				"display:flex",
+				"gap:6px",
+				"flex-wrap:wrap",
+				"max-width:70vw",
+				"padding:8px 12px 0"
+			].join(";");
+			for (let index = 0; index < pendingLocalImages.length; index += 1) {
+				const image = pendingLocalImages[index];
+				const chip = document.createElement("span");
+				chip.style.cssText = [
+					"display:inline-flex",
+					"align-items:center",
+					"gap:6px",
+					"background:rgba(28,28,32,.92)",
+					"border:1px solid rgba(128,128,128,.4)",
+					"color:#eee",
+					"border-radius:999px",
+					"padding:3px 6px 3px 10px",
+					"font:12px/1.5 -apple-system,\"PingFang SC\",sans-serif",
+					"max-width:280px",
+					"overflow:hidden",
+					"text-overflow:ellipsis",
+					"white-space:nowrap"
+				].join(";");
+				chip.textContent = `🖼 ${image.name ?? `图片 ${index + 1}`}`;
+				const remove = document.createElement("button");
+				remove.textContent = "×";
+				remove.title = "移除";
+				remove.style.cssText = [
+					"border:none",
+					"background:transparent",
+					"color:#aaa",
+					"cursor:pointer",
+					"font:14px/1 sans-serif",
+					"padding:0 4px"
+				].join(";");
+				remove.addEventListener("click", () => {
+					pendingLocalImages.splice(index, 1);
+					renderLocalImageDraft();
+				});
+				chip.append(remove);
+				bar.append(chip);
+			}
+			const composer = document.querySelector("[data-composer-card]");
+			if (composer !== null && composer.firstChild !== null) composer.insertBefore(bar, composer.firstChild);
+			else document.body.appendChild(bar);
+		}
+		/**
+		* Handle files chosen via the local "＋" button: images are queued as image
+		* parts for the next message (recognition path); other files are uploaded to
+		* the session workspace (upload path).
+		* @param originalFetch - the unpatched global fetch.
+		* @param files - the chosen files.
+		*/
+		function addLocalFiles(originalFetch, files) {
+			const recognizeOn = readConfig().recognizeEnabled;
+			const uploadable = [];
+			for (const file of Array.from(files)) if (file.type.startsWith("image/")) {
+				if (!recognizeOn) {
+					showUploadChip(`当前模型不支持识图，已跳过 ${file.name}`);
+					continue;
+				}
+				(async () => {
+					try {
+						const data = await readFileAsBase64(file);
+						pendingLocalImages.push({
+							type: "image",
+							mediaType: file.type || "image/png",
+							data,
+							name: file.name
+						});
+						renderLocalImageDraft();
+					} catch {
+						showUploadChip(`⚠️ 无法读取图片 ${file.name}`);
+					}
+				})();
+			} else uploadable.push(file);
+			(async () => {
+				for (const file of uploadable) try {
+					await uploadFile(originalFetch, file);
+				} catch (error) {
+					showUploadChip(`⚠️ ${file.name} 上传失败：${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}
+		/** Read a File as a base64 data string. */
+		function readFileAsBase64(file) {
+			return new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => {
+					const result = String(reader.result ?? "");
+					const comma = result.indexOf(",");
+					resolve(comma >= 0 ? result.slice(comma + 1) : result);
+				};
+				reader.onerror = () => reject(reader.error ?? /* @__PURE__ */ new Error("read failed"));
+				reader.readAsDataURL(file);
+			});
 		}
 		/**
 		* Resolve the most recently active session's working directory via the
@@ -711,8 +826,13 @@ window.__ModuleLoader__.load({
 				if (envelope.type !== "client-request" || envelope.method !== "session.prompt") return originalFetch(input, init);
 				const payload = envelope.payload;
 				if (payload === void 0) return originalFetch(input, init);
-				const content = payload.content;
+				let content = payload.content;
 				if (!Array.isArray(content)) return originalFetch(input, init);
+				if (pendingLocalImages.length > 0) {
+					content = [...pendingLocalImages.splice(0), ...content];
+					payload.content = content;
+					renderLocalImageDraft();
+				}
 				const texts = content.filter(isTextPart).map((part) => part.text ?? "").join("");
 				const uploadBlock = pendingUploads.splice(0).map((upload) => `${upload.name}`);
 				if (uploadBlock.length > 0) {
@@ -836,6 +956,49 @@ window.__ModuleLoader__.load({
 			if (readConfig().uploadEnabled) {
 				const onPaste = (event) => handleFilePaste(originalFetch, event);
 				document.addEventListener("paste", onPaste, { capture: true });
+				const input = document.createElement("input");
+				input.type = "file";
+				input.multiple = true;
+				input.style.display = "none";
+				input.addEventListener("change", () => {
+					if (input.files !== null && input.files.length > 0) addLocalFiles(originalFetch, input.files);
+					input.value = "";
+				});
+				const addButton = document.createElement("button");
+				addButton.textContent = "＋";
+				addButton.title = "添加文件或图片";
+				addButton.style.cssText = [
+					"position:fixed",
+					"z-index:9995",
+					"width:28px",
+					"height:28px",
+					"border-radius:50%",
+					"border:1px solid rgba(128,128,128,.4)",
+					"background:rgba(28,28,32,.85)",
+					"color:#ddd",
+					"cursor:pointer",
+					"font:16px/1 sans-serif",
+					"display:flex",
+					"align-items:center",
+					"justify-content:center",
+					"padding:0"
+				].join(";");
+				addButton.addEventListener("click", () => input.click());
+				document.body.appendChild(addButton);
+				const positionAddButton = () => {
+					const composer = document.querySelector("[data-composer-card]");
+					if (composer !== null) {
+						const rect = composer.getBoundingClientRect();
+						addButton.style.left = `${rect.left + 8}px`;
+						addButton.style.top = `${rect.bottom - 38}px`;
+					} else {
+						addButton.style.left = "12px";
+						addButton.style.bottom = "96px";
+						addButton.style.top = "auto";
+					}
+				};
+				positionAddButton();
+				const repositionTimer = window.setInterval(positionAddButton, 800);
 				const hasFiles = (event) => Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files");
 				const swallow = (event) => {
 					event.preventDefault();
@@ -871,6 +1034,9 @@ window.__ModuleLoader__.load({
 					window.removeEventListener("dragleave", onDragLeave, { capture: true });
 					window.removeEventListener("drop", onDrop, { capture: true });
 					window.clearInterval(overlayKiller);
+					window.clearInterval(repositionTimer);
+					addButton.remove();
+					input.remove();
 				});
 			}
 			ctx.effect(() => () => {
