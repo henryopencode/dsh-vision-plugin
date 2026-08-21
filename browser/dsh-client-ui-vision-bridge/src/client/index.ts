@@ -537,7 +537,21 @@ function openVisionSettings(): void {
   }
 
   const buttons = document.createElement('div')
-  buttons.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:18px;'
+  buttons.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:18px;'
+
+  // Connection test result line (hidden until a test runs).
+  const testResult = document.createElement('div')
+  testResult.style.cssText = [
+    'display:none', 'margin-top:10px', 'padding:8px 10px', 'border-radius:8px',
+    'font-size:12px', 'line-height:1.5', 'word-break:break-all',
+  ].join(';')
+  panel.append(testResult)
+  const showTest = (ok: boolean, text: string): void => {
+    testResult.style.display = 'block'
+    testResult.style.background = ok ? 'rgba(52,211,153,.12)' : 'rgba(248,113,113,.12)'
+    testResult.style.color = ok ? '#34d399' : '#f87171'
+    testResult.textContent = text
+  }
 
   const btn = (text: string, primary: boolean): HTMLButtonElement => {
     const b = document.createElement('button')
@@ -553,8 +567,42 @@ function openVisionSettings(): void {
     return b
   }
 
+  // Test connectivity with the current form values (not yet saved).
+  const test = btn('测试连接', false)
   const save = btn('保存', true)
   const cancel = btn('取消', false)
+
+  test.addEventListener('click', () => {
+    test.disabled = true
+    test.textContent = '测试中…'
+    showTest(true, '正在测试连接…')
+    const payload = {
+      model: modelInput.value.trim() || config.model,
+      baseURL: baseURLInput.value.trim() || config.baseURL,
+      apiKey: apiKeyInput.value.trim(),
+    }
+    const originalFetch = window.fetch.bind(window)
+    void (async () => {
+      try {
+        const response = await originalFetch('/vision/probe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const data = await response.json() as { ok?: boolean; reason?: string }
+        if (data.ok === true) {
+          showTest(true, '✅ 连接成功')
+        } else {
+          showTest(false, `❌ 连接失败：${data.reason ?? '未知错误'}`)
+        }
+      } catch {
+        showTest(false, '❌ 连接失败：无法访问识图服务')
+      } finally {
+        test.disabled = false
+        test.textContent = '测试连接'
+      }
+    })()
+  })
 
   const close = (): void => overlay.remove()
 

@@ -427,7 +427,24 @@ window.__ModuleLoader__.load({
 				})();
 			}
 			const buttons = document.createElement("div");
-			buttons.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:18px;";
+			buttons.style.cssText = "display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:18px;";
+			const testResult = document.createElement("div");
+			testResult.style.cssText = [
+				"display:none",
+				"margin-top:10px",
+				"padding:8px 10px",
+				"border-radius:8px",
+				"font-size:12px",
+				"line-height:1.5",
+				"word-break:break-all"
+			].join(";");
+			panel.append(testResult);
+			const showTest = (ok, text) => {
+				testResult.style.display = "block";
+				testResult.style.background = ok ? "rgba(52,211,153,.12)" : "rgba(248,113,113,.12)";
+				testResult.style.color = ok ? "#34d399" : "#f87171";
+				testResult.textContent = text;
+			};
 			const btn = (text, primary) => {
 				const b = document.createElement("button");
 				b.textContent = text;
@@ -442,8 +459,36 @@ window.__ModuleLoader__.load({
 				buttons.append(b);
 				return b;
 			};
+			const test = btn("测试连接", false);
 			const save = btn("保存", true);
 			const cancel = btn("取消", false);
+			test.addEventListener("click", () => {
+				test.disabled = true;
+				test.textContent = "测试中…";
+				showTest(true, "正在测试连接…");
+				const payload = {
+					model: modelInput.value.trim() || config.model,
+					baseURL: baseURLInput.value.trim() || config.baseURL,
+					apiKey: apiKeyInput.value.trim()
+				};
+				const originalFetch = window.fetch.bind(window);
+				(async () => {
+					try {
+						const data = await (await originalFetch("/vision/probe", {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify(payload)
+						})).json();
+						if (data.ok === true) showTest(true, "✅ 连接成功");
+						else showTest(false, `❌ 连接失败：${data.reason ?? "未知错误"}`);
+					} catch {
+						showTest(false, "❌ 连接失败：无法访问识图服务");
+					} finally {
+						test.disabled = false;
+						test.textContent = "测试连接";
+					}
+				})();
+			});
 			const close = () => overlay.remove();
 			save.addEventListener("click", () => {
 				const next = {

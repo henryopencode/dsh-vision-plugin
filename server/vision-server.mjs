@@ -255,32 +255,54 @@ export function apply(ctx, config) {
         return
       }
 
-      // GET /vision/probe — same-origin health check that also warms the
-      // model. Returns which models are installed and whether they are loaded.
-      if (url === '/vision/probe' && req.method === 'GET') {
+      // /vision/probe — health check. GET uses the server's patch config;
+      // POST accepts per-request { model, baseURL, apiKey } overrides so the
+      // settings dialog can test an edited endpoint before saving.
+      if (url === '/vision/probe' && (req.method === 'GET' || req.method === 'POST')) {
         let ok = true
         let reason
         let known = []
         let loaded = false
+        let probeModel = model
+        let probeBaseURL = baseURL
+        let probeApiKey = apiKey
+        let probeRemote = remote
+        if (req.method === 'POST') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            respond(400, { error: 'invalid json body' })
+            return
+          }
+          if (typeof parsed?.model === 'string' && parsed.model.length > 0) probeModel = parsed.model
+          if (typeof parsed?.baseURL === 'string' && parsed.baseURL.length > 0) probeBaseURL = parsed.baseURL
+          if (typeof parsed?.apiKey === 'string') probeApiKey = parsed.apiKey
+          probeRemote = probeApiKey !== ''
+        }
+        // A real end-to-end connectivity check: ask the configured model a
+        // trivial question through the configured endpoint. On success the
+        // whole chain (baseURL + apiKey + model) is reachable.
+        const probeMessages = [{ role: 'user', content: 'ping' }]
         try {
-          known = await listModels(AbortSignal.timeout(8000))
-          loaded = await modelLoaded(model)
+          const content = await chatCompletion(
+            probeBaseURL,
+            probeModel,
+            probeMessages,
+            8,
+            AbortSignal.timeout(15000),
+            numCtx,
+            probeApiKey,
+          )
+          if (typeof content !== 'string' || content.length === 0) {
+            ok = false
+            reason = '模型返回为空'
+          }
+          loaded = probeRemote
         } catch (error) {
           ok = false
           reason = error?.message ?? String(error)
         }
-        if (!remote) {
-          // Local Ollama: the model must actually be pulled.
-          const matches = (name) => known.includes(name) || known.includes(`${name}:latest`) || known.includes(name.split(':')[0])
-          const missing = []
-          if (!matches(model)) missing.push(model)
-          if (ocrEnabled && ocrModel !== '' && !matches(ocrModel)) missing.push(ocrModel)
-          if (missing.length > 0) {
-            ok = false
-            reason = `模型未安装：${missing.join('、')}（请运行 ollama pull ${missing.join(' 和 ollama pull ')}）`
-          }
-        }
-        if (ok) warmUpModel(model)
         respond(200, { ok, reason, loaded })
         return
       }
