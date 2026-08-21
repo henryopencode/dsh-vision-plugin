@@ -1061,6 +1061,8 @@ window.__ModuleLoader__.load({
 							"flex-wrap:nowrap",
 							"padding:0 12px",
 							"min-height:30px",
+							"margin-top:-10px",
+							"margin-bottom:-12px",
 							"border-bottom:1px solid rgba(128,128,128,.15)",
 							"min-width:0",
 							"overflow:visible",
