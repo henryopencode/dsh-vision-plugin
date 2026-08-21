@@ -567,18 +567,24 @@ window.__ModuleLoader__.load({
 			return payload.path;
 		}
 		/**
-		* Upload every non-image file from a paste event (Finder copy → Cmd+V in the
+		* Upload every file from a paste event (Finder copy → Cmd+V in the
 		* composer). The InputBar's own paste handler only accepts images, so we
-		* intercept non-image files here, upload them, and let the next message carry
-		* their server paths. Images pass through untouched (recognition path).
+		* intercept files here. With recognition off, images are dropped too (the
+		* chat model can't take image input) — a short notice replaces them instead
+		* of a raw image body that trips HTTP 413.
 		* @param originalFetch - the unpatched global fetch.
 		* @param event - the paste event being handled.
 		*/
 		function handleFilePaste(originalFetch, event) {
-			const uploadable = Array.from(event.clipboardData?.items ?? []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file) => file !== null).filter((file) => !file.type.startsWith("image/"));
-			if (uploadable.length === 0) return;
+			const files = Array.from(event.clipboardData?.items ?? []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file) => file !== null);
+			if (files.length === 0) return;
+			const recognizeOn = readConfig().recognizeEnabled;
+			const uploadable = files.filter((file) => !file.type.startsWith("image/"));
+			const droppedImages = files.filter((file) => file.type.startsWith("image/"));
+			if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return;
 			event.preventDefault();
 			event.stopPropagation();
+			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`该模型暂不支持识图，已跳过 ${droppedImages.length} 张图片（可粘贴 Word/PDF 文件上传）`);
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -588,14 +594,21 @@ window.__ModuleLoader__.load({
 			})();
 		}
 		/**
-		* Upload every non-image file dropped onto the page (drag & drop into the
-		* conversation). Images pass through untouched (recognition path).
+		* Upload every file dropped onto the page (drag & drop into the
+		* conversation). Always stops propagation so DSH's own drop handler does not
+		* try to treat a document as an image draft (it would pop a
+		* "仅支持 PNG、JPG、WebP、GIF" error). With recognition off, dropped images
+		* are skipped with a notice.
 		* @param originalFetch - the unpatched global fetch.
 		* @param files - the dropped files.
 		*/
 		function handleFileDrop(originalFetch, files) {
-			const uploadable = Array.from(files).filter((file) => !file.type.startsWith("image/"));
-			if (uploadable.length === 0) return;
+			const all = Array.from(files);
+			const recognizeOn = readConfig().recognizeEnabled;
+			const uploadable = all.filter((file) => !file.type.startsWith("image/"));
+			const droppedImages = all.filter((file) => file.type.startsWith("image/"));
+			if (uploadable.length === 0 && (recognizeOn || droppedImages.length === 0)) return;
+			if (!recognizeOn && droppedImages.length > 0) showUploadChip(`该模型暂不支持识图，已跳过 ${droppedImages.length} 张图片（可拖入 Word/PDF 文件上传）`);
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -720,7 +733,7 @@ window.__ModuleLoader__.load({
 				const images = content.filter(isImagePart);
 				if (images.length === 0) return originalFetch(input, init);
 				if (!readConfig().recognizeEnabled) {
-					const note = `【识图已关闭】当前未启用图片识别（recognizeEnabled: false），已跳过 ${images.length} 张图片。请粘贴 Word/PDF 文件上传，或在浏览器控制台执行 localStorage.setItem('dsh-vision:config', JSON.stringify({ recognizeEnabled: true, uploadEnabled: true })) 后刷新以开启识图。`;
+					const note = `【该模型暂不支持识图，已跳过 ${images.length} 张图片】`;
 					payload.content = [...texts.trim().length > 0 ? [{
 						type: "text",
 						text: texts.trim()
@@ -828,18 +841,17 @@ window.__ModuleLoader__.load({
 				};
 				const onDrop = (event) => {
 					const files = Array.from(event.dataTransfer?.files ?? []);
-					if (files.some((file) => !file.type.startsWith("image/"))) {
-						event.preventDefault();
-						event.stopPropagation();
-						handleFileDrop(originalFetch, files);
-					}
+					if (files.length === 0) return;
+					event.preventDefault();
+					event.stopPropagation();
+					handleFileDrop(originalFetch, files);
 				};
 				document.addEventListener("dragover", onDragOver);
-				document.addEventListener("drop", onDrop);
+				document.addEventListener("drop", onDrop, { capture: true });
 				ctx.effect(() => () => {
 					document.removeEventListener("paste", onPaste, { capture: true });
 					document.removeEventListener("dragover", onDragOver);
-					document.removeEventListener("drop", onDrop);
+					document.removeEventListener("drop", onDrop, { capture: true });
 				});
 			}
 			ctx.effect(() => () => {
