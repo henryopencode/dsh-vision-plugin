@@ -263,27 +263,12 @@ window.__ModuleLoader__.load({
 			}
 		}
 		/**
-		* Position the pill over the middle content column: horizontally centered on
-		* the composer card (the content area's true center, not the page's) and
-		* vertically aligned with the view-tab bar ("对话/轨迹", the two lines),
-		* nudged slightly down-right. Falls back to page top-center.
+		* Position the pill fixed at the top-center of the viewport. It must NOT
+		* chase layout: session switches re-render the composer card, which would
+		* drag the pill around the page.
 		* @param el - the indicator element.
 		*/
 		function positionIndicator(el) {
-			const composer = document.querySelector("[data-composer-card]");
-			if (composer !== null) {
-				const rect = composer.getBoundingClientRect();
-				const width = el.offsetWidth > 0 ? el.offsetWidth : 120;
-				const centerX = rect.left + rect.width / 2;
-				const tabs = document.querySelector("[role=\"tablist\"]");
-				const tabTop = tabs !== null ? tabs.getBoundingClientRect().top : rect.top - 60;
-				el.style.left = `${Math.max(4, centerX - width / 2 + 6)}px`;
-				el.style.top = `${Math.max(4, tabTop - 25)}px`;
-				el.style.bottom = "auto";
-				el.style.right = "auto";
-				el.style.transform = "none";
-				return;
-			}
 			el.style.top = "10px";
 			el.style.left = "50%";
 			el.style.right = "auto";
@@ -328,12 +313,6 @@ window.__ModuleLoader__.load({
 					if (created.dataset.busy === "1") return;
 					onToggle();
 				});
-				const pill = el;
-				const reposition = () => positionIndicator(pill);
-				window.addEventListener("scroll", reposition, { passive: true });
-				window.addEventListener("resize", reposition, { passive: true });
-				const ticker = window.setInterval(reposition, 800);
-				el.dataset.ticker = String(ticker);
 				document.body.appendChild(el);
 			}
 			if (state === "busy") {
@@ -410,10 +389,21 @@ window.__ModuleLoader__.load({
 				card.style.bottom = "96px";
 				card.style.transform = "translateX(-50%)";
 			}
+			if (composer !== null) {
+				const anchor = composer;
+				if (card.dataset.watch === void 0) card.dataset.watch = String(window.setInterval(() => {
+					if (document.getElementById("dsh-vision-progress") === null) return;
+					if (!anchor.isConnected) removeProgressCard();
+				}, 500));
+			}
 		}
 		/** Remove the "sending" progress card. */
 		function removeProgressCard() {
-			document.getElementById("dsh-vision-progress")?.remove();
+			const card = document.getElementById("dsh-vision-progress");
+			if (card === null) return;
+			const watch = card.dataset.watch;
+			if (watch !== void 0) window.clearInterval(Number(watch));
+			card.remove();
 		}
 		/** Uploaded files pending attachment to the next outgoing message. */
 		const pendingUploads = [];
@@ -764,8 +754,9 @@ window.__ModuleLoader__.load({
 					text: "（以上是图片识别结果。请结合用户的问题和识别结果，直接回答用户的问题。）"
 				});
 				payload.content = rewritten;
+				const { signal: _droppedSignal, ...resendInit } = init;
 				return originalFetch(input, {
-					...init,
+					...resendInit,
 					body: JSON.stringify(envelope)
 				});
 			};

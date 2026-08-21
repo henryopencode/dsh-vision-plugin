@@ -362,30 +362,12 @@ async function probeModels(
 type IndicatorState = 'online' | 'offline' | 'busy' | 'disabled'
 
 /**
- * Position the pill over the middle content column: horizontally centered on
- * the composer card (the content area's true center, not the page's) and
- * vertically aligned with the view-tab bar ("对话/轨迹", the two lines),
- * nudged slightly down-right. Falls back to page top-center.
+ * Position the pill fixed at the top-center of the viewport. It must NOT
+ * chase layout: session switches re-render the composer card, which would
+ * drag the pill around the page.
  * @param el - the indicator element.
  */
 function positionIndicator(el: HTMLElement): void {
-  const composer = document.querySelector('[data-composer-card]')
-  if (composer !== null) {
-    const rect = composer.getBoundingClientRect()
-    const width = el.offsetWidth > 0 ? el.offsetWidth : 120
-    // Horizontal: content-area center + a small right nudge.
-    const centerX = rect.left + rect.width / 2
-    // Vertical: the view-tab bar (two lines) when present, else above the
-    // composer; plus a small downward nudge.
-    const tabs = document.querySelector('[role="tablist"]')
-    const tabTop = tabs !== null ? tabs.getBoundingClientRect().top : rect.top - 60
-    el.style.left = `${Math.max(4, centerX - width / 2 + 6)}px`
-    el.style.top = `${Math.max(4, tabTop - 25)}px`
-    el.style.bottom = 'auto'
-    el.style.right = 'auto'
-    el.style.transform = 'none'
-    return
-  }
   el.style.top = '10px'
   el.style.left = '50%'
   el.style.right = 'auto'
@@ -427,14 +409,6 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
       if (created.dataset.busy === '1') return
       onToggle()
     })
-    // Re-anchor while the layout settles (composer/tab bar render after the
-    // app mounts) and on scroll/resize.
-    const pill = el
-    const reposition = (): void => positionIndicator(pill)
-    window.addEventListener('scroll', reposition, { passive: true })
-    window.addEventListener('resize', reposition, { passive: true })
-    const ticker = window.setInterval(reposition, 800)
-    el.dataset.ticker = String(ticker)
     document.body.appendChild(el)
   }
   if (state === 'busy') {
@@ -509,11 +483,31 @@ function showProgressCard(images: PromptImagePart[], stage: string): void {
     card.style.bottom = '96px'
     card.style.transform = 'translateX(-50%)'
   }
+  // Session switch: the composer card is re-rendered (its DOM node is
+  // replaced), so a detached anchor means the user left this session — drop
+  // the stale progress card. Recognition continues in the background; its
+  // completion path already tolerates a missing card.
+  if (composer !== null) {
+    const anchor = composer
+    if (card.dataset.watch === undefined) {
+      card.dataset.watch = String(window.setInterval(() => {
+        const live = document.getElementById('dsh-vision-progress')
+        if (live === null) return
+        if (!anchor.isConnected) {
+          removeProgressCard()
+        }
+      }, 500))
+    }
+  }
 }
 
 /** Remove the "sending" progress card. */
 function removeProgressCard(): void {
-  document.getElementById('dsh-vision-progress')?.remove()
+  const card = document.getElementById('dsh-vision-progress')
+  if (card === null) return
+  const watch = card.dataset.watch
+  if (watch !== undefined) window.clearInterval(Number(watch))
+  card.remove()
 }
 
 /** Uploaded files pending attachment to the next outgoing message. */
@@ -886,7 +880,11 @@ export function apply(ctx: ClientContext): void {
     }
     payload.content = rewritten
 
-    return originalFetch(input, { ...init, body: JSON.stringify(envelope) })
+    // The DSH composer may abort its original request (its own send timeout)
+    // while recognition is still running; resending with that aborted signal
+    // would fail immediately and drop the message. Drop the signal and resend.
+    const { signal: _droppedSignal, ...resendInit } = init
+    return originalFetch(input, { ...resendInit, body: JSON.stringify(envelope) })
   }
 
   window.fetch = patchedFetch
