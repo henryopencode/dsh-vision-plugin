@@ -108,6 +108,7 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 | `ocrModel` | `deepseek-ocr` | OCR model for precise text (`''` disables) |
 | `ocrEnabled` | `false` | Run the OCR pass (slower, more precise text) |
 | `timeoutMs` | `120000` | Per-engine timeout |
+| `keepAlive` | `-1` | Ollama keep-alive sent on each call (Windows Ollama honors it; macOS 0.32.x ignores it — use the `OLLAMA_KEEP_ALIVE` env var there) |
 | `maxImageEdge` | `2048` | Recognition resolution (2048 keeps small text legible; 1280 misreads names like 全能王) |
 | `maxImages` | `4` | Max images per message |
 
@@ -115,6 +116,42 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 - `qwen2.5vl:3b` — fast (~15 s), light on RAM; occasionally makes up names
 - `qwen3-vl:4b` — accurate on dense small text (~30 s)
 - `deepseek-ocr` + vision model — dual engine: precise OCR text + scene description
+
+## Performance: avoid "first recognition times out"
+
+Ollama loads the vision model on demand and, by default, unloads it after 5
+minutes idle (`OLLAMA_KEEP_ALIVE=5m0s`). The first image after idle then pays a
+cold load — on a CPU-only machine that can feel like a timeout and succeed only
+on the second attempt. Two fixes, in order of impact:
+
+1. **Keep the model resident.** This plugin already sends `keep_alive: -1` on
+   every recognition call, so once the model is loaded it stays loaded. For
+   belt-and-braces (and to cover any other Ollama caller), also set:
+   ```powershell
+   setx OLLAMA_KEEP_ALIVE -1   # Windows; macOS/Linux: export in your shell profile
+   ```
+2. **Use the iGPU/GPU.** Ollama drops integrated GPUs by default. If your
+   machine has an iGPU (e.g. AMD Radeon 780M), enable it so inference is far
+   faster than CPU:
+   ```powershell
+   setx OLLAMA_IGPU_ENABLE 1   # Windows
+   ```
+   Then restart Ollama. (A discrete NVIDIA/AMD GPU needs no such flag.)
+
+Optional: warm the model at logon with `scripts/warmup-ollama.ps1` so the very
+first recognition of the day is already warm:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\warmup-ollama.ps1
+```
+
+Register it in the Windows Startup folder (or a logon task) pointing at the
+script's full path.
+
+> Note: `keep_alive` in the request body is honored by the Windows Ollama
+> build (verified by the original contributor) but ignored by macOS Ollama
+> 0.32.x. The reliable cross-platform way to keep the model resident is the
+> `OLLAMA_KEEP_ALIVE=-1` environment variable (then restart Ollama).
 
 ## Why not just use native multimodal (DSH v0.1.0-rc.8)?
 

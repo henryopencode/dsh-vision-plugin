@@ -39,6 +39,13 @@ export const DEFAULT_CONFIG = {
   model: 'qwen2.5vl:3b',
   /** Per-engine recognition timeout (each OCR/vision call). */
   timeoutMs: 120_000,
+  /**
+   * Ollama keep_alive for each recognition call. `-1` keeps the model resident
+   * after recognition, so the next image skips the cold load (the "first one
+   * times out, second one works" symptom). A positive number unloads after
+   * that many idle seconds.
+   */
+  keepAlive: -1,
   /** Upper bound of images recognized in one message. */
   maxImages: 4,
   /**
@@ -280,6 +287,7 @@ async function recognizeViaServer(
         ocrEnabled: config.ocrEnabled,
         maxImageEdge: config.maxImageEdge,
         timeoutMs: config.timeoutMs,
+        keepAlive: config.keepAlive,
         question,
         images: prepared,
       }),
