@@ -376,7 +376,7 @@ function positionIndicator(el: HTMLElement): void {
   el.style.right = ''
   el.style.bottom = ''
   el.style.transform = ''
-  el.style.margin = '4px 0'
+  el.style.margin = '0'
   const composer = document.querySelector('[data-composer-card]')
   if (composer === null) {
     if (el.parentElement !== document.body) document.body.appendChild(el)
@@ -1238,17 +1238,9 @@ export function apply(ctx: ClientContext): void {
       }
     }
     placeAddButton()
+    // Poll only. A MutationObserver here caused an infinite loop: moving the
+    // pill/button triggers the observer, which moves them again → page freeze.
     const repositionTimer = window.setInterval(placeAddButton, 400)
-    let rowObserver
-    const watchRow = (): void => {
-      const composer = document.querySelector('[data-composer-card]')
-      if (composer === null) return
-      if (rowObserver !== undefined) rowObserver.disconnect()
-      rowObserver = new MutationObserver(() => placeAddButton())
-      rowObserver.observe(composer, { childList: true, subtree: true })
-    }
-    watchRow()
-    const rowWatchTimer = window.setInterval(watchRow, 1000)
 
     // Drag & drop a file onto the page uploads it too. Intercept at the
     // window capture phase (before DSH's own listeners) and stop immediate
@@ -1289,7 +1281,6 @@ export function apply(ctx: ClientContext): void {
       window.removeEventListener('drop', onDrop, { capture: true })
       window.clearInterval(overlayKiller)
       window.clearInterval(repositionTimer)
-      window.clearInterval(rowWatchTimer)
       addButton.remove()
       input.remove()
     })

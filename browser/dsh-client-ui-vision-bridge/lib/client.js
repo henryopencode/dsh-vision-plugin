@@ -276,7 +276,7 @@ window.__ModuleLoader__.load({
 			el.style.right = "";
 			el.style.bottom = "";
 			el.style.transform = "";
-			el.style.margin = "4px 0";
+			el.style.margin = "0";
 			const composer = document.querySelector("[data-composer-card]");
 			if (composer === null) {
 				if (el.parentElement !== document.body) document.body.appendChild(el);
@@ -1085,19 +1085,6 @@ window.__ModuleLoader__.load({
 				};
 				placeAddButton();
 				const repositionTimer = window.setInterval(placeAddButton, 400);
-				let rowObserver;
-				const watchRow = () => {
-					const composer = document.querySelector("[data-composer-card]");
-					if (composer === null) return;
-					if (rowObserver !== void 0) rowObserver.disconnect();
-					rowObserver = new MutationObserver(() => placeAddButton());
-					rowObserver.observe(composer, {
-						childList: true,
-						subtree: true
-					});
-				};
-				watchRow();
-				const rowWatchTimer = window.setInterval(watchRow, 1e3);
 				const hasFiles = (event) => Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files");
 				const swallow = (event) => {
 					event.preventDefault();
@@ -1134,7 +1121,6 @@ window.__ModuleLoader__.load({
 					window.removeEventListener("drop", onDrop, { capture: true });
 					window.clearInterval(overlayKiller);
 					window.clearInterval(repositionTimer);
-					window.clearInterval(rowWatchTimer);
 					addButton.remove();
 					input.remove();
 				});
