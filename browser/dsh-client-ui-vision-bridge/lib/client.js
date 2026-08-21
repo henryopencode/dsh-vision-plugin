@@ -263,96 +263,13 @@ window.__ModuleLoader__.load({
 			}
 		}
 		/**
-		* Mount the pill inside the composer card (top row) so it sits in the
-		* layout, anchored to the composer — never window-fixed, so it cannot end up
-		* in the wrong place across sessions/scroll.
-		* @param el - the indicator element.
+		* Status pill removed per user request: recognition feedback lives on the
+		* thumbnail overlay ("识别中 Xs") instead. This no-op keeps the call sites
+		* intact and removes any stale pill element.
 		*/
-		function positionIndicator(el) {
-			el.style.position = "static";
-			el.style.zIndex = "";
-			el.style.top = "";
-			el.style.left = "";
-			el.style.right = "";
-			el.style.bottom = "";
-			el.style.transform = "";
-			el.style.margin = "auto 0";
-			const composer = document.querySelector("[data-composer-card]");
-			if (composer === null) {
-				if (el.parentElement !== document.body) document.body.appendChild(el);
-				return;
-			}
-			const rail = document.getElementById("dsh-vision-ui-rail");
-			if (rail !== null) {
-				if (el.parentElement !== rail || rail.firstChild !== el) rail.insertBefore(el, rail.firstChild);
-				return;
-			}
-			if (el.parentElement !== composer) composer.insertBefore(el, composer.firstChild);
-		}
-		/**
-		* Update (or create) the status pill over the middle content column: it only
-		* reflects readiness (ready / unavailable / disabled) and doubles as the
-		* bridge switch. While recognition runs it keeps showing "识图就绪" and
-		* clicks are ignored — stage progress lives on the sending card instead.
-		* @param state - the state to show.
-		* @param detail - optional detail text.
-		* @param onToggle - callback for a click (toggle the bridge).
-		*/
-		function updateStatusIndicator(state, detail, onToggle) {
-			if (!readConfig().recognizeEnabled) {
-				const existing = document.getElementById("dsh-vision-indicator");
-				if (existing !== null) existing.remove();
-				return;
-			}
-			let el = document.getElementById("dsh-vision-indicator");
-			if (el === null) {
-				el = document.createElement("button");
-				el.id = "dsh-vision-indicator";
-				el.title = "点击开启/关闭本地识图";
-				el.style.cssText = [
-					"border:1px solid rgba(128,128,128,.35)",
-					"background:rgba(28,28,32,.85)",
-					"color:#ddd",
-					"cursor:pointer",
-					"padding:0 12px",
-					"border-radius:999px",
-					"height:30px",
-					"box-sizing:border-box",
-					"font:12px/1 -apple-system,BlinkMacSystemFont,\"PingFang SC\",sans-serif",
-					"box-shadow:0 2px 8px rgba(0,0,0,.2)",
-					"white-space:nowrap",
-					"display:inline-flex",
-					"align-items:center",
-					"justify-content:center"
-				].join(";");
-				const created = el;
-				el.addEventListener("click", () => {
-					if (created.dataset.busy === "1") return;
-					onToggle();
-				});
-			}
-			if (state === "busy") {
-				const prevTimer = Number(el.dataset.timer);
-				if (Number.isFinite(prevTimer) && prevTimer > 0) window.clearInterval(prevTimer);
-				el.dataset.busy = "1";
-				const startedAt = Date.now();
-				const tick = () => {
-					const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1e3));
-					el.textContent = `⏳ 识别中 ${sec}s`;
-				};
-				tick();
-				const timer = window.setInterval(tick, 1e3);
-				el.dataset.timer = String(timer);
-			} else {
-				delete el.dataset.busy;
-				const timer = Number(el.dataset.timer);
-				if (Number.isFinite(timer) && timer > 0) {
-					window.clearInterval(timer);
-					delete el.dataset.timer;
-				}
-				el.textContent = `${state === "online" ? "🟢" : state === "disabled" ? "⚪" : "🔴"} ${state === "online" ? "识图就绪" : state === "disabled" ? "识图已关闭（点击开启）" : "识图不可用"}${detail === void 0 ? "" : ` · ${detail}`}`;
-			}
-			positionIndicator(el);
+		function updateStatusIndicator(_state, _detail, _onToggle) {
+			const existing = document.getElementById("dsh-vision-indicator");
+			if (existing !== null) existing.remove();
 		}
 		/** Uploaded files pending attachment to the next outgoing message. */
 		const pendingUploads = [];
