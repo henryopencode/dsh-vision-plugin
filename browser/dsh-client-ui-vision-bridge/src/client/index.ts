@@ -456,6 +456,9 @@ function openVisionSettings(): void {
     ? '当前：远程 API（Bearer 认证）'
     : '当前：本地 Ollama'
 
+  // Title and mode line go first; field() appends inputs below them.
+  panel.append(title, modeLine)
+
   const isLocalURL = (url: string): boolean =>
     /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url.trim())
 
@@ -580,7 +583,7 @@ function openVisionSettings(): void {
 
   cancel.addEventListener('click', close)
 
-  panel.append(title, modeLine, buttons)
+  panel.append(buttons)
   overlay.append(panel)
   document.body.appendChild(overlay)
 }

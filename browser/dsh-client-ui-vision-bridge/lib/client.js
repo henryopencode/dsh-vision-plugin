@@ -348,6 +348,7 @@ window.__ModuleLoader__.load({
 			const modeLine = document.createElement("div");
 			modeLine.style.cssText = "font-size:12px;color:#8a8a94;margin-bottom:14px;";
 			modeLine.textContent = isRemote ? "当前：远程 API（Bearer 认证）" : "当前：本地 Ollama";
+			panel.append(title, modeLine);
 			const isLocalURL = (url) => /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url.trim());
 			const field = (label, value, placeholder, type = "text") => {
 				const l = document.createElement("label");
@@ -460,7 +461,7 @@ window.__ModuleLoader__.load({
 				showUploadChip("已保存识图配置，刷新页面后完全生效");
 			});
 			cancel.addEventListener("click", close);
-			panel.append(title, modeLine, buttons);
+			panel.append(buttons);
 			overlay.append(panel);
 			document.body.appendChild(overlay);
 		}
