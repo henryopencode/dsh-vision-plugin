@@ -982,32 +982,43 @@ export function apply(ctx: ClientContext): void {
     const onPaste = (event: ClipboardEvent): void => handleFilePaste(originalFetch, event)
     document.addEventListener('paste', onPaste, { capture: true })
     // Drag & drop a file onto the page uploads it too. Intercept at the
-    // window capture phase (before DSH's own document listeners) and stop
-    // immediate propagation so DSH never sees the file — otherwise it shows
-    // its native "图片拖动到此处即可添加 / 最多 N 张，每张 X MB" overlay and
-    // tries to add the file as an image draft.
-    const onDragOver = (event: DragEvent): void => {
-      const types = Array.from(event.dataTransfer?.types ?? [])
-      if (types.some(type => type === 'Files')) {
-        event.preventDefault()
-        event.stopPropagation()
-        event.stopImmediatePropagation()
-      }
-    }
-    const onDrop = (event: DragEvent): void => {
-      const files = Array.from(event.dataTransfer?.files ?? [])
-      if (files.length === 0) return
+    // window capture phase (before DSH's own listeners) and stop immediate
+    // propagation for EVERY drag event carrying files: DSH shows its native
+    // "文件拖动到此处即可添加" overlay on dragenter and hides it on drop —
+    // if it only sees the enter it stays stuck over the composer and blocks
+    // typing. Never letting it see any drag event avoids that entirely.
+    const hasFiles = (event: DragEvent): boolean =>
+      Array.from(event.dataTransfer?.types ?? []).some(type => type === 'Files')
+    const swallow = (event: DragEvent): void => {
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
+    }
+    const onDragEnter = (event: DragEvent): void => { if (hasFiles(event)) swallow(event) }
+    const onDragOver = (event: DragEvent): void => { if (hasFiles(event)) swallow(event) }
+    const onDragLeave = (event: DragEvent): void => { if (hasFiles(event)) swallow(event) }
+    const onDrop = (event: DragEvent): void => {
+      const files = Array.from(event.dataTransfer?.files ?? [])
+      if (files.length === 0) return
+      swallow(event)
       handleFileDrop(originalFetch, files)
     }
+    window.addEventListener('dragenter', onDragEnter, { capture: true })
     window.addEventListener('dragover', onDragOver, { capture: true })
+    window.addEventListener('dragleave', onDragLeave, { capture: true })
     window.addEventListener('drop', onDrop, { capture: true })
+    // Belt & braces: if DSH's overlay ever appears (e.g. a drag that started
+    // before this plugin loaded), remove it so the composer stays usable.
+    const overlayKiller = window.setInterval(() => {
+      document.querySelectorAll('[data-conversation-composer-overlay]').forEach(el => el.remove())
+    }, 500)
     ctx.effect(() => () => {
       document.removeEventListener('paste', onPaste, { capture: true })
+      window.removeEventListener('dragenter', onDragEnter, { capture: true })
       window.removeEventListener('dragover', onDragOver, { capture: true })
+      window.removeEventListener('dragleave', onDragLeave, { capture: true })
       window.removeEventListener('drop', onDrop, { capture: true })
+      window.clearInterval(overlayKiller)
     })
   }
   ctx.effect(() => () => {

@@ -836,27 +836,41 @@ window.__ModuleLoader__.load({
 			if (readConfig().uploadEnabled) {
 				const onPaste = (event) => handleFilePaste(originalFetch, event);
 				document.addEventListener("paste", onPaste, { capture: true });
+				const hasFiles = (event) => Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files");
+				const swallow = (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					event.stopImmediatePropagation();
+				};
+				const onDragEnter = (event) => {
+					if (hasFiles(event)) swallow(event);
+				};
 				const onDragOver = (event) => {
-					if (Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files")) {
-						event.preventDefault();
-						event.stopPropagation();
-						event.stopImmediatePropagation();
-					}
+					if (hasFiles(event)) swallow(event);
+				};
+				const onDragLeave = (event) => {
+					if (hasFiles(event)) swallow(event);
 				};
 				const onDrop = (event) => {
 					const files = Array.from(event.dataTransfer?.files ?? []);
 					if (files.length === 0) return;
-					event.preventDefault();
-					event.stopPropagation();
-					event.stopImmediatePropagation();
+					swallow(event);
 					handleFileDrop(originalFetch, files);
 				};
+				window.addEventListener("dragenter", onDragEnter, { capture: true });
 				window.addEventListener("dragover", onDragOver, { capture: true });
+				window.addEventListener("dragleave", onDragLeave, { capture: true });
 				window.addEventListener("drop", onDrop, { capture: true });
+				const overlayKiller = window.setInterval(() => {
+					document.querySelectorAll("[data-conversation-composer-overlay]").forEach((el) => el.remove());
+				}, 500);
 				ctx.effect(() => () => {
 					document.removeEventListener("paste", onPaste, { capture: true });
+					window.removeEventListener("dragenter", onDragEnter, { capture: true });
 					window.removeEventListener("dragover", onDragOver, { capture: true });
+					window.removeEventListener("dragleave", onDragLeave, { capture: true });
 					window.removeEventListener("drop", onDrop, { capture: true });
+					window.clearInterval(overlayKiller);
 				});
 			}
 			ctx.effect(() => () => {
