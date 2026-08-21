@@ -595,7 +595,18 @@ function renderLocalImageDraft(): void {
       pendingLocalImages.splice(index, 1)
       renderLocalImageDraft()
     })
-    item.append(img, remove)
+    // Recognition overlay: a translucent mask over the thumbnail while the
+    // image is being recognized, with a live seconds counter.
+    const overlay = document.createElement('div')
+    overlay.className = 'dsh-vision-thumb-overlay'
+    overlay.style.cssText = [
+      'position:absolute', 'inset:0', 'background:rgba(0,0,0,.55)',
+      'display:none', 'align-items:center', 'justify-content:center',
+      'color:#fff', 'font:11px/1.4 -apple-system,"PingFang SC",sans-serif',
+      'text-align:center', 'padding:4px', 'pointer-events:none',
+    ].join(';')
+    overlay.textContent = '识别中…'
+    item.append(img, overlay, remove)
     bar.append(item)
   }
   const composer = document.querySelector('[data-composer-card]')
@@ -603,6 +614,42 @@ function renderLocalImageDraft(): void {
     composer.insertBefore(bar, composer.firstChild)
   } else {
     document.body.appendChild(bar)
+  }
+}
+
+/**
+ * Show a live "识别中 Xs" mask over every pending image thumbnail. Called
+ * when recognition starts; the thumbnails are kept on screen until it ends.
+ */
+function showThumbnailOverlay(): void {
+  const startedAt = Date.now()
+  const items = Array.from(document.querySelectorAll('.dsh-vision-thumb-overlay'))
+  const tick = (): void => {
+    const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+    for (const el of items) {
+      if (el instanceof HTMLElement) {
+        el.style.display = 'flex'
+        el.textContent = `识别中 ${sec}s`
+      }
+    }
+  }
+  tick()
+  const timer = window.setInterval(tick, 1000)
+  window.setTimeout(() => {
+    // Give the interval a bounded life; cleared earlier on completion.
+  }, 0)
+  document.documentElement.dataset.visionThumbTimer = String(timer)
+}
+
+/** Hide thumbnail overlays and clear the live timer. */
+function hideThumbnailOverlay(): void {
+  const timer = Number(document.documentElement.dataset.visionThumbTimer)
+  if (Number.isFinite(timer) && timer > 0) {
+    window.clearInterval(timer)
+    delete document.documentElement.dataset.visionThumbTimer
+  }
+  for (const el of document.querySelectorAll('.dsh-vision-thumb-overlay')) {
+    if (el instanceof HTMLElement) el.style.display = 'none'
   }
 }
 
@@ -962,11 +1009,13 @@ export function apply(ctx: ClientContext): void {
     if (!Array.isArray(content)) return originalFetch(input, init)
 
     // Local "＋"-picked images join the outgoing message as image parts.
+    // The draft thumbnails stay visible during recognition (masked), so they
+    // are NOT spliced/cleared here — cleared on completion.
     if (pendingLocalImages.length > 0) {
-      const picked = pendingLocalImages.splice(0)
+      const picked = pendingLocalImages.slice(0)
       content = [...picked, ...content]
       payload.content = content
-      renderLocalImageDraft()
+      showThumbnailOverlay()
     }
 
     // Strip the zero-width send-placeholder (used to enable the send button
@@ -1057,6 +1106,14 @@ export function apply(ctx: ClientContext): void {
         `⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`,
       )
       updateStatusIndicator('offline', undefined, toggleBridge)
+    }
+
+    // Recognition finished: clear the thumbnail mask and drop the pending
+    // image draft (the images already rode into `content` above).
+    hideThumbnailOverlay()
+    if (pendingLocalImages.length > 0) {
+      pendingLocalImages.splice(0)
+      renderLocalImageDraft()
     }
 
     // The user's own text comes first (normal message shape); the recognition

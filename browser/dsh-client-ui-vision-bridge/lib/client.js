@@ -508,12 +508,56 @@ window.__ModuleLoader__.load({
 					pendingLocalImages.splice(index, 1);
 					renderLocalImageDraft();
 				});
-				item.append(img, remove);
+				const overlay = document.createElement("div");
+				overlay.className = "dsh-vision-thumb-overlay";
+				overlay.style.cssText = [
+					"position:absolute",
+					"inset:0",
+					"background:rgba(0,0,0,.55)",
+					"display:none",
+					"align-items:center",
+					"justify-content:center",
+					"color:#fff",
+					"font:11px/1.4 -apple-system,\"PingFang SC\",sans-serif",
+					"text-align:center",
+					"padding:4px",
+					"pointer-events:none"
+				].join(";");
+				overlay.textContent = "识别中…";
+				item.append(img, overlay, remove);
 				bar.append(item);
 			}
 			const composer = document.querySelector("[data-composer-card]");
 			if (composer !== null && composer.firstChild !== null) composer.insertBefore(bar, composer.firstChild);
 			else document.body.appendChild(bar);
+		}
+		/**
+		* Show a live "识别中 Xs" mask over every pending image thumbnail. Called
+		* when recognition starts; the thumbnails are kept on screen until it ends.
+		*/
+		function showThumbnailOverlay() {
+			const startedAt = Date.now();
+			const items = Array.from(document.querySelectorAll(".dsh-vision-thumb-overlay"));
+			const tick = () => {
+				const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1e3));
+				for (const el of items) if (el instanceof HTMLElement) {
+					el.style.display = "flex";
+					el.textContent = `识别中 ${sec}s`;
+				}
+			};
+			tick();
+			const timer = window.setInterval(tick, 1e3);
+			window.setTimeout(() => {}, 0);
+			document.documentElement.dataset.visionThumbTimer = String(timer);
+		}
+		/** Hide thumbnail overlays and clear the live timer. */
+		function hideThumbnailOverlay() {
+			const timer = Number(document.documentElement.dataset.visionThumbTimer);
+			if (Number.isFinite(timer) && timer > 0) {
+				window.clearInterval(timer);
+				delete document.documentElement.dataset.visionThumbTimer;
+			}
+			for (const el of document.querySelectorAll(".dsh-vision-thumb-overlay")) if (el instanceof HTMLElement) el.style.display = "none";
 		}
 		/**
 		* Handle files chosen via the local "＋" button: images are queued as image
@@ -809,9 +853,9 @@ window.__ModuleLoader__.load({
 				let content = payload.content;
 				if (!Array.isArray(content)) return originalFetch(input, init);
 				if (pendingLocalImages.length > 0) {
-					content = [...pendingLocalImages.splice(0), ...content];
+					content = [...pendingLocalImages.slice(0), ...content];
 					payload.content = content;
-					renderLocalImageDraft();
+					showThumbnailOverlay();
 				}
 				content = content.map((part) => isTextPart(part) ? {
 					type: "text",
@@ -889,6 +933,11 @@ window.__ModuleLoader__.load({
 				} else {
 					recognized.push(`⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`);
 					updateStatusIndicator("offline", void 0, toggleBridge);
+				}
+				hideThumbnailOverlay();
+				if (pendingLocalImages.length > 0) {
+					pendingLocalImages.splice(0);
+					renderLocalImageDraft();
 				}
 				const rewritten = [];
 				if (texts.trim().length > 0) rewritten.push({
