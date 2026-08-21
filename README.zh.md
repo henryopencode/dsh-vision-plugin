@@ -108,6 +108,7 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 | `ocrModel` | `deepseek-ocr` | OCR 模型（`''` 关闭） |
 | `ocrEnabled` | `false` | 是否执行 OCR 提取（更慢但文字精确） |
 | `timeoutMs` | `120000` | 单引擎超时 |
+| `keepAlive` | `-1` | Ollama keep-alive；`-1` 让模型识别后常驻（下次识别不再冷加载） |
 | `maxImageEdge` | `1280` | 上传前压缩边长 |
 | `maxImages` | `4` | 单条消息最多图片数 |
 
@@ -115,6 +116,28 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 - `qwen2.5vl:3b` — 快（约 15 秒）、省内存；偶尔会编造名称
 - `qwen3-vl:4b` — 密集小字准确（约 30 秒）
 - `deepseek-ocr` + 视觉模型 — 双引擎：精确文字 + 场景描述
+
+## 性能优化：避免「第一次识别超时」
+
+Ollama 按需加载识别模型，默认闲置 5 分钟即卸载（`OLLAMA_KEEP_ALIVE=5m0s`）。闲置后的第一张图要重新冷加载——纯 CPU 机器上这很容易表现为「第一次超时、第二次才成功」。按影响排序，两个修复：
+
+1. **让模型常驻。** 本插件已在每次识别请求里带上 `keep_alive: -1`，模型一旦加载就不再卸载。为稳妥起见（也覆盖其他调用方），再设置：
+   ```powershell
+   setx OLLAMA_KEEP_ALIVE -1   # Windows；macOS/Linux 写入 shell profile
+   ```
+2. **启用核显/独显。** Ollama 默认丢弃核显。若你的机器有核显（如 AMD Radeon 780M），启用后推理比 CPU 快得多：
+   ```powershell
+   setx OLLAMA_IGPU_ENABLE 1   # Windows
+   ```
+   然后重启 Ollama。（NVIDIA/AMD 独显无需此开关。）
+
+可选：用 `scripts/warmup-ollama.ps1` 在登录时预热模型，让开机后第一张图就是热的：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\warmup-ollama.ps1
+```
+
+把它注册到 Windows 启动文件夹（或登录任务）指向脚本完整路径。
 
 ## 故障排查
 
