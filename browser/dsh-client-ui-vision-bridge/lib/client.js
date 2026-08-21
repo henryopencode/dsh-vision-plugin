@@ -340,6 +340,7 @@ window.__ModuleLoader__.load({
 			const modeLine = document.createElement("div");
 			modeLine.style.cssText = "font-size:12px;color:#8a8a94;margin-bottom:14px;";
 			modeLine.textContent = isRemote ? "当前：远程 API（Bearer 认证）" : "当前：本地 Ollama";
+			const isLocalURL = (url) => /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url.trim());
 			const field = (label, value, placeholder, type = "text") => {
 				const l = document.createElement("label");
 				l.textContent = label;
@@ -365,7 +366,37 @@ window.__ModuleLoader__.load({
 			};
 			const modelInput = field("模型", config.model, "qwen2.5vl:3b 或 glm-4v-flash");
 			const baseURLInput = field("Base URL", config.baseURL, "http://127.0.0.1:11434/v1");
-			const apiKeyInput = field("API Key（远程模型需要，本地 Ollama 留空）", config.apiKey, "粘贴智谱/其他 API Key", "password");
+			const keyLabel = document.createElement("label");
+			keyLabel.textContent = "API Key";
+			keyLabel.style.cssText = "display:block;font-size:12px;color:#a8a8b2;margin:12px 0 4px;";
+			const apiKeyInput = document.createElement("input");
+			apiKeyInput.type = "password";
+			apiKeyInput.value = config.apiKey;
+			apiKeyInput.placeholder = "远程模型的 API Key（本地 Ollama 不需要）";
+			apiKeyInput.spellcheck = false;
+			apiKeyInput.style.cssText = [
+				"width:100%",
+				"background:#121218",
+				"color:#eee",
+				"border:1px solid #33333e",
+				"border-radius:8px",
+				"padding:8px 10px",
+				"font-size:13px",
+				"outline:none",
+				"box-sizing:border-box"
+			].join(";");
+			const keyRow = document.createElement("div");
+			keyRow.id = "dsh-vision-key-row";
+			keyRow.style.cssText = "display:block;";
+			keyRow.append(keyLabel, apiKeyInput);
+			panel.append(keyRow);
+			const updateMode = () => {
+				const local = isLocalURL(baseURLInput.value);
+				keyRow.style.display = local ? "none" : "block";
+				modeLine.textContent = local ? "当前：本地 Ollama" : "当前：远程 API（Bearer 认证）";
+			};
+			baseURLInput.addEventListener("input", updateMode);
+			updateMode();
 			const buttons = document.createElement("div");
 			buttons.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:18px;";
 			const btn = (text, primary) => {
