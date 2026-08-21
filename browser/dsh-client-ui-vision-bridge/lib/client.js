@@ -1059,7 +1059,7 @@ window.__ModuleLoader__.load({
 							"justify-content:flex-start",
 							"gap:6px",
 							"flex-wrap:nowrap",
-							"padding:0 12px 5px",
+							"padding:10px 12px",
 							"min-height:30px",
 							"margin-top:-10px",
 							"margin-bottom:-12px",
