@@ -87,6 +87,19 @@ EOF
 # 5. 重启 dsh web，刷新浏览器
 ```
 
+## 最低配置要求
+
+| 部件 | 最低要求 | 说明 |
+|---|---|---|
+| CPU | 2015 年以后的 x86（支持 AVX2），或 Apple Silicon | 更早的 CPU（如 2011 年的 i5-2400）无法运行现代 Ollama |
+| 内存 | **8GB**（仅 3b 模型，会慢且可能卡顿）；**16GB 推荐** | 8GB 跑 3b 勉强；4b 需要 16GB |
+| 磁盘 | 20GB 可用空间 | 模型 3.5GB/个 + DSH + 系统 |
+| GPU | 可选 | 无 GPU 时 CPU 推理约 20-60 秒/图；有 GPU（如 GTX 1650）快 3-5 倍 |
+| 无独显的机器 | CPU 必须带核显（无 F 后缀）| 如 i5-12400F 无核显，不装独显无法显示 |
+| 系统 | Windows 10/11、macOS、Linux（x64/arm64）| — |
+
+> 注意：`keep_alive` 请求参数在 Windows 版 Ollama 生效，macOS 0.32.x 忽略；跨平台常驻用 `OLLAMA_KEEP_ALIVE=-1` 环境变量。
+
 ## 配置
 
 用户级配置存放在浏览器 `localStorage` 的 `dsh-vision:config`（控制台执行）：

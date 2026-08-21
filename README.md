@@ -87,6 +87,21 @@ EOF
 # 5. restart dsh web, refresh browser
 ```
 
+## Minimum hardware
+
+| Component | Minimum | Notes |
+|---|---|---|
+| CPU | x86 from 2015+ (AVX2) or Apple Silicon | Older CPUs (e.g. 2011 i5-2400) cannot run modern Ollama |
+| RAM | **8 GB** (3b model only; slow, may lag); **16 GB recommended** | 4b needs 16 GB |
+| Disk | 20 GB free | Models are ~3.5 GB each + DSH + OS |
+| GPU | Optional | CPU-only inference ~20-60 s/image; a GPU (e.g. GTX 1650) is 3-5x faster |
+| No discrete GPU | CPU must have integrated graphics (no `F` suffix) | e.g. i5-12400F has no iGPU and cannot display without a GPU |
+| OS | Windows 10/11, macOS, Linux (x64/arm64) | — |
+
+> Note: the `keep_alive` request parameter is honored by the Windows Ollama
+> build; macOS 0.32.x ignores it — use the `OLLAMA_KEEP_ALIVE=-1` env var for
+> cross-platform residency.
+
 ## Configuration
 
 Per-user overrides live in `localStorage` (browser console) under `dsh-vision:config`:
