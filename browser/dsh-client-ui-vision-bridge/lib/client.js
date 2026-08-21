@@ -837,7 +837,11 @@ window.__ModuleLoader__.load({
 				const onPaste = (event) => handleFilePaste(originalFetch, event);
 				document.addEventListener("paste", onPaste, { capture: true });
 				const onDragOver = (event) => {
-					if (Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files")) event.preventDefault();
+					if (Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files")) {
+						event.preventDefault();
+						event.stopPropagation();
+						event.stopImmediatePropagation();
+					}
 				};
 				const onDrop = (event) => {
 					const files = Array.from(event.dataTransfer?.files ?? []);
@@ -847,12 +851,12 @@ window.__ModuleLoader__.load({
 					event.stopImmediatePropagation();
 					handleFileDrop(originalFetch, files);
 				};
-				document.addEventListener("dragover", onDragOver);
-				document.addEventListener("drop", onDrop, { capture: true });
+				window.addEventListener("dragover", onDragOver, { capture: true });
+				window.addEventListener("drop", onDrop, { capture: true });
 				ctx.effect(() => () => {
 					document.removeEventListener("paste", onPaste, { capture: true });
-					document.removeEventListener("dragover", onDragOver);
-					document.removeEventListener("drop", onDrop, { capture: true });
+					window.removeEventListener("dragover", onDragOver, { capture: true });
+					window.removeEventListener("drop", onDrop, { capture: true });
 				});
 			}
 			ctx.effect(() => () => {

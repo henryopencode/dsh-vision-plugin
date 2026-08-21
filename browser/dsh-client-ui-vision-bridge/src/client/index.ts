@@ -981,32 +981,33 @@ export function apply(ctx: ClientContext): void {
     // Capture phase: run before the composer's own paste handler.
     const onPaste = (event: ClipboardEvent): void => handleFilePaste(originalFetch, event)
     document.addEventListener('paste', onPaste, { capture: true })
-    // Drag & drop a file onto the page uploads it too. Prevent the default
-    // AND stop propagation for any file drop so DSH's own drop handler never
-    // sees it (it would add the file as an image draft and pop a
-    // "仅支持 PNG、JPG、WebP、GIF 格式的图片" error).
+    // Drag & drop a file onto the page uploads it too. Intercept at the
+    // window capture phase (before DSH's own document listeners) and stop
+    // immediate propagation so DSH never sees the file — otherwise it shows
+    // its native "图片拖动到此处即可添加 / 最多 N 张，每张 X MB" overlay and
+    // tries to add the file as an image draft.
     const onDragOver = (event: DragEvent): void => {
       const types = Array.from(event.dataTransfer?.types ?? [])
-      if (types.some(type => type === 'Files')) event.preventDefault()
+      if (types.some(type => type === 'Files')) {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+      }
     }
     const onDrop = (event: DragEvent): void => {
       const files = Array.from(event.dataTransfer?.files ?? [])
       if (files.length === 0) return
-      // stopImmediatePropagation: DSH registers its own drop listener on the
-      // same document node; stopPropagation alone would not stop it from
-      // treating a document as an image draft and popping a
-      // "仅支持 PNG、JPG、WebP、GIF 格式的图片" error.
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
       handleFileDrop(originalFetch, files)
     }
-    document.addEventListener('dragover', onDragOver)
-    document.addEventListener('drop', onDrop, { capture: true })
+    window.addEventListener('dragover', onDragOver, { capture: true })
+    window.addEventListener('drop', onDrop, { capture: true })
     ctx.effect(() => () => {
       document.removeEventListener('paste', onPaste, { capture: true })
-      document.removeEventListener('dragover', onDragOver)
-      document.removeEventListener('drop', onDrop, { capture: true })
+      window.removeEventListener('dragover', onDragOver, { capture: true })
+      window.removeEventListener('drop', onDrop, { capture: true })
     })
   }
   ctx.effect(() => () => {
