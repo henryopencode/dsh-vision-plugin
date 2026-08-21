@@ -653,6 +653,30 @@ function renderLocalImageDraft(): void {
 }
 
 /**
+ * DSH's send button is enabled only when the composer input has content. A
+ * picked image lives in our own draft (DSH knows nothing about it), so the
+ * button stays disabled. Inject a zero-width placeholder into the textarea
+ * and fire an input event: DSH sees content → enables send. The placeholder
+ * is stripped from the outgoing message by patchedFetch.
+ */
+function enableSendButton(): void {
+  const composer = document.querySelector('[data-composer-card]')
+  if (composer === null) return
+  const textarea = composer.querySelector('textarea')
+  if (textarea === null || textarea.readOnly || textarea.disabled) return
+  const placeholder = '\u200b'
+  if (!textarea.value.includes(placeholder)) {
+    textarea.value = placeholder + textarea.value
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+}
+
+/** Remove the zero-width send-placeholder from a message text. */
+function stripSendPlaceholder(text: string): string {
+  return text.replace(/\u200b/g, '').trim()
+}
+
+/**
  * Handle files chosen via the local "＋" button: images are queued as image
  * parts for the next message (recognition path); other files are uploaded to
  * the session workspace (upload path).
@@ -662,12 +686,14 @@ function renderLocalImageDraft(): void {
 function addLocalFiles(originalFetch: typeof fetch, files: FileList | File[]): void {
   const recognizeOn = readConfig().recognizeEnabled
   const uploadable: File[] = []
+  let pickedImage = false
   for (const file of Array.from(files)) {
     if (file.type.startsWith('image/')) {
       if (!recognizeOn) {
         showUploadChip(`当前模型不支持识图，已跳过 ${file.name}`)
         continue
       }
+      pickedImage = true
       void (async () => {
         try {
           const data = await readFileAsBase64(file)
@@ -686,6 +712,7 @@ function addLocalFiles(originalFetch: typeof fetch, files: FileList | File[]): v
       uploadable.push(file)
     }
   }
+  if (pickedImage) enableSendButton()
   void (async () => {
     for (const file of uploadable) {
       try {
@@ -972,6 +999,12 @@ export function apply(ctx: ClientContext): void {
       renderLocalImageDraft()
     }
 
+    // Strip the zero-width send-placeholder (used to enable the send button
+    // when only an image was picked) from every text part.
+    content = content.map(part =>
+      isTextPart(part) ? { type: 'text' as const, text: stripSendPlaceholder(part.text ?? '') } : part)
+    payload.content = content
+
     const texts = content.filter(isTextPart).map(part => part.text ?? '').join('')
     // Files attached via paste must ride along on ANY outgoing message, even
     // a pure-text one (no image parts), and the draft bar must clear.
@@ -1147,16 +1180,22 @@ export function apply(ctx: ClientContext): void {
         addButton.style.zIndex = '9995'
         return
       }
-      if (addButton.parentElement === composer) return
+      // Insert on the same row as the input: find the textarea's row
+      // container and place the button right before it (left of the text).
       addButton.style.position = 'static'
       addButton.style.zIndex = ''
       addButton.style.left = ''
       addButton.style.bottom = ''
       addButton.style.top = ''
-      composer.append(addButton)
+      const textarea = composer.querySelector('textarea')
+      const row = textarea?.parentElement ?? null
+      if (row !== null) {
+        if (addButton.parentElement !== row) row.insertBefore(addButton, textarea)
+      } else if (addButton.parentElement !== composer) {
+        composer.append(addButton)
+      }
+      return
     }
-    placeAddButton()
-    const repositionTimer = window.setInterval(placeAddButton, 800)
 
     // Drag & drop a file onto the page uploads it too. Intercept at the
     // window capture phase (before DSH's own listeners) and stop immediate

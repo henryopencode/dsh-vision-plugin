@@ -573,6 +573,28 @@ window.__ModuleLoader__.load({
 			else document.body.appendChild(bar);
 		}
 		/**
+		* DSH's send button is enabled only when the composer input has content. A
+		* picked image lives in our own draft (DSH knows nothing about it), so the
+		* button stays disabled. Inject a zero-width placeholder into the textarea
+		* and fire an input event: DSH sees content → enables send. The placeholder
+		* is stripped from the outgoing message by patchedFetch.
+		*/
+		function enableSendButton() {
+			const composer = document.querySelector("[data-composer-card]");
+			if (composer === null) return;
+			const textarea = composer.querySelector("textarea");
+			if (textarea === null || textarea.readOnly || textarea.disabled) return;
+			const placeholder = "​";
+			if (!textarea.value.includes(placeholder)) {
+				textarea.value = placeholder + textarea.value;
+				textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			}
+		}
+		/** Remove the zero-width send-placeholder from a message text. */
+		function stripSendPlaceholder(text) {
+			return text.replace(/\u200b/g, "").trim();
+		}
+		/**
 		* Handle files chosen via the local "＋" button: images are queued as image
 		* parts for the next message (recognition path); other files are uploaded to
 		* the session workspace (upload path).
@@ -582,11 +604,13 @@ window.__ModuleLoader__.load({
 		function addLocalFiles(originalFetch, files) {
 			const recognizeOn = readConfig().recognizeEnabled;
 			const uploadable = [];
+			let pickedImage = false;
 			for (const file of Array.from(files)) if (file.type.startsWith("image/")) {
 				if (!recognizeOn) {
 					showUploadChip(`当前模型不支持识图，已跳过 ${file.name}`);
 					continue;
 				}
+				pickedImage = true;
 				(async () => {
 					try {
 						const data = await readFileAsBase64(file);
@@ -602,6 +626,7 @@ window.__ModuleLoader__.load({
 					}
 				})();
 			} else uploadable.push(file);
+			if (pickedImage) enableSendButton();
 			(async () => {
 				for (const file of uploadable) try {
 					await uploadFile(originalFetch, file);
@@ -842,6 +867,11 @@ window.__ModuleLoader__.load({
 					payload.content = content;
 					renderLocalImageDraft();
 				}
+				content = content.map((part) => isTextPart(part) ? {
+					type: "text",
+					text: stripSendPlaceholder(part.text ?? "")
+				} : part);
+				payload.content = content;
 				const texts = content.filter(isTextPart).map((part) => part.text ?? "").join("");
 				const uploadBlock = pendingUploads.splice(0).map((upload) => `${upload.name}`);
 				if (uploadBlock.length > 0) {
@@ -994,26 +1024,6 @@ window.__ModuleLoader__.load({
 				].join(";");
 				addButton.addEventListener("click", () => input.click());
 				document.body.appendChild(addButton);
-				const placeAddButton = () => {
-					const composer = document.querySelector("[data-composer-card]");
-					if (composer === null) {
-						addButton.style.position = "fixed";
-						addButton.style.left = "12px";
-						addButton.style.bottom = "96px";
-						addButton.style.top = "auto";
-						addButton.style.zIndex = "9995";
-						return;
-					}
-					if (addButton.parentElement === composer) return;
-					addButton.style.position = "static";
-					addButton.style.zIndex = "";
-					addButton.style.left = "";
-					addButton.style.bottom = "";
-					addButton.style.top = "";
-					composer.append(addButton);
-				};
-				placeAddButton();
-				const repositionTimer = window.setInterval(placeAddButton, 800);
 				const hasFiles = (event) => Array.from(event.dataTransfer?.types ?? []).some((type) => type === "Files");
 				const swallow = (event) => {
 					event.preventDefault();
