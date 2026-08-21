@@ -53,19 +53,25 @@ function readBody(req) {
   })
 }
 
-/** One chat-completion call against the local OpenAI-compatible endpoint. */
-async function chatCompletion(baseURL, model, messages, maxTokens, signal, numCtx = 32768) {
+/** One chat-completion call against an OpenAI-compatible endpoint. Local
+ * Ollama (no apiKey) may pass num_ctx; remote providers (apiKey set) ignore
+ * it, so only include it for the local case. Some remote providers cap
+ * max_tokens (Zhipu: 1..1024) — clamp to a safe bound when remote. */
+async function chatCompletion(baseURL, model, messages, maxTokens, signal, numCtx = 32768, apiKey) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (apiKey !== undefined && apiKey !== '') headers.Authorization = `Bearer ${apiKey}`
+  const body = {
+    model,
+    temperature: 0,
+    messages,
+    max_tokens: apiKey !== undefined && apiKey !== '' ? Math.min(maxTokens, 1024) : maxTokens,
+    stream: false,
+  }
+  if (apiKey === undefined || apiKey === '') body.num_ctx = numCtx
   const response = await fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      num_ctx: numCtx,
-      temperature: 0,
-      messages,
-      max_tokens: maxTokens,
-      stream: false,
-    }),
+    headers,
+    body: JSON.stringify(body),
     signal,
   })
   if (!response.ok) {
@@ -127,6 +133,7 @@ async function downscale(data, mediaType, maxEdge) {
 export function apply(ctx, config) {
   const baseURL = config?.baseURL ?? DEFAULT_BASE_URL
   const model = config?.model ?? 'qwen3-vl:4b'
+  const apiKey = config?.apiKey ?? ''
   const ocrModel = config?.ocrModel ?? 'deepseek-ocr'
   const ocrEnabled = config?.ocrEnabled ?? false
   const maxEdge = config?.maxImageEdge ?? 2048
@@ -135,7 +142,10 @@ export function apply(ctx, config) {
   // KV-cache context window. Small servers (4 GB RAM) must keep this low:
   // a big num_ctx (32768) makes Ollama allocate a huge KV cache and the
   // model load gets OOM-killed. 4096 fits recognition prompts comfortably.
+  // Remote providers (apiKey set) ignore num_ctx entirely.
   const numCtx = config?.numCtx ?? 32768
+  // Remote provider (apiKey): probe should not check local Ollama residency.
+  const remote = apiKey !== undefined && apiKey !== ''
 
   // upload name -> absolute path, so GET /vision/file/<name> can download.
   const uploadedFiles = new Map()
@@ -148,16 +158,19 @@ export function apply(ctx, config) {
   // Models whose warm-up request has been fired (avoid re-firing per probe).
   const warmed = new Set()
 
-  /** List models the local service serves (OpenAI-compatible listing). */
+  /** List models the service serves (OpenAI-compatible listing). */
   async function listModels(signal) {
-    const response = await fetch(`${baseURL.replace(/\/+$/, '')}/models`, { method: 'GET', headers: { Accept: 'application/json' }, signal })
+    const headers = { Accept: 'application/json' }
+    if (remote) headers.Authorization = `Bearer ${apiKey}`
+    const response = await fetch(`${baseURL.replace(/\/+$/, '')}/models`, { method: 'GET', headers, signal })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const payload = await response.json()
     return (payload?.data ?? []).map((entry) => entry?.id ?? '')
   }
 
-  /** Whether the model is currently loaded (Ollama /api/ps). */
+  /** Whether the model is currently loaded (Ollama /api/ps); remote: true. */
   async function modelLoaded(modelName) {
+    if (remote) return true
     try {
       const base = baseURL.replace(/\/+$/, '').replace(/\/v1$/, '')
       const response = await fetch(`${base}/api/ps`, { method: 'GET', signal: AbortSignal.timeout(5000) })
@@ -174,9 +187,10 @@ export function apply(ctx, config) {
    * model load (seconds to a minute+ on CPU-only Windows). Kicking the load
    * off during the pre-send probe means the real request usually finds the
    * model already loaded. Never awaited; errors are swallowed.
+   * Remote providers have nothing to warm locally — skipped.
    */
   function warmUpModel(modelName) {
-    if (warmed.has(modelName)) return
+    if (remote || warmed.has(modelName)) return
     warmed.add(modelName)
     void fetch(`${baseURL.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
@@ -214,13 +228,16 @@ export function apply(ctx, config) {
           ok = false
           reason = error?.message ?? String(error)
         }
-        const matches = (name) => known.includes(name) || known.includes(`${name}:latest`) || known.includes(name.split(':')[0])
-        const missing = []
-        if (!matches(model)) missing.push(model)
-        if (ocrEnabled && ocrModel !== '' && !matches(ocrModel)) missing.push(ocrModel)
-        if (missing.length > 0) {
-          ok = false
-          reason = `模型未安装：${missing.join('、')}（请运行 ollama pull ${missing.join(' 和 ollama pull ')}）`
+        if (!remote) {
+          // Local Ollama: the model must actually be pulled.
+          const matches = (name) => known.includes(name) || known.includes(`${name}:latest`) || known.includes(name.split(':')[0])
+          const missing = []
+          if (!matches(model)) missing.push(model)
+          if (ocrEnabled && ocrModel !== '' && !matches(ocrModel)) missing.push(ocrModel)
+          if (missing.length > 0) {
+            ok = false
+            reason = `模型未安装：${missing.join('、')}（请运行 ollama pull ${missing.join(' 和 ollama pull ')}）`
+          }
         }
         if (ok) warmUpModel(model)
         respond(200, { ok, reason, loaded })
@@ -430,7 +447,7 @@ export function apply(ctx, config) {
                       { type: 'image_url', image_url: { url: dataUrl } },
                     ],
                   },
-                ], 1500, controller.signal, numCtx)
+                ], 1500, controller.signal, numCtx, apiKey)
                 if (useOcr) {
                   const raw = await chatCompletion(baseURL, ocrModel, [
                     {
@@ -440,7 +457,7 @@ export function apply(ctx, config) {
                         { type: 'image_url', image_url: { url: dataUrl } },
                       ],
                     },
-                  ], 2000, controller.signal, numCtx)
+                  ], 2000, controller.signal, numCtx, apiKey)
                   const cleaned = cleanOcrText(raw)
                   text = cleaned.length > 0 ? cleaned : undefined
                 }
