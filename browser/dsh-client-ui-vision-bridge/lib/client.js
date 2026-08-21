@@ -16,6 +16,12 @@ window.__ModuleLoader__.load({
 			/** Local vision endpoint (Ollama OpenAI-compatible base URL). */
 			baseURL: "http://127.0.0.1:11434/v1",
 			/**
+			* Bearer API key for remote vision providers (Zhipu glm-4v-flash etc.).
+			* Empty string = local Ollama (no auth header). Editable in the settings
+			* dialog opened from the status pill.
+			*/
+			apiKey: "",
+			/**
 			* Vision model to ask. qwen2.5vl:3b is the fast default; switch to
 			* qwen3-vl:4b when dense small-text accuracy matters more than speed.
 			*/
@@ -198,6 +204,8 @@ window.__ModuleLoader__.load({
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
 						model: config.model,
+						baseURL: config.baseURL,
+						apiKey: config.apiKey,
 						ocrModel: config.ocrModel,
 						ocrEnabled: config.ocrEnabled,
 						maxImageEdge: config.maxImageEdge,
@@ -290,19 +298,127 @@ window.__ModuleLoader__.load({
 			if (el.parentElement !== composer) composer.insertBefore(el, composer.firstChild);
 		}
 		/**
+		* Open a settings dialog for the vision bridge: shows the current endpoint
+		* (local baseURL or remote baseURL), the model, and an editable API key.
+		* Saving persists to localStorage (dsh-vision:config); recognition requests
+		* then carry these values to the server plugin, which overrides its own
+		* defaults per request.
+		*/
+		function openVisionSettings() {
+			document.getElementById("dsh-vision-settings")?.remove();
+			const config = readConfig();
+			const isRemote = config.apiKey !== void 0 && config.apiKey !== "";
+			const overlay = document.createElement("div");
+			overlay.id = "dsh-vision-settings";
+			overlay.style.cssText = [
+				"position:fixed",
+				"inset:0",
+				"z-index:10001",
+				"background:rgba(0,0,0,.5)",
+				"display:flex",
+				"align-items:center",
+				"justify-content:center"
+			].join(";");
+			overlay.addEventListener("click", (e) => {
+				if (e.target === overlay) close();
+			});
+			const panel = document.createElement("div");
+			panel.style.cssText = [
+				"width:420px",
+				"max-width:90vw",
+				"background:#1a1a20",
+				"border:1px solid #33333e",
+				"border-radius:14px",
+				"padding:20px",
+				"box-shadow:0 12px 40px rgba(0,0,0,.5)",
+				"font:13px/1.6 -apple-system,\"PingFang SC\",sans-serif",
+				"color:#e8e8ec"
+			].join(";");
+			const title = document.createElement("h3");
+			title.textContent = "识图设置";
+			title.style.cssText = "margin:0 0 4px;font-size:15px;";
+			const modeLine = document.createElement("div");
+			modeLine.style.cssText = "font-size:12px;color:#8a8a94;margin-bottom:14px;";
+			modeLine.textContent = isRemote ? "当前：远程 API（Bearer 认证）" : "当前：本地 Ollama";
+			const field = (label, value, placeholder, type = "text") => {
+				const l = document.createElement("label");
+				l.textContent = label;
+				l.style.cssText = "display:block;font-size:12px;color:#a8a8b2;margin:12px 0 4px;";
+				const input = document.createElement("input");
+				input.type = type;
+				input.value = value;
+				input.placeholder = placeholder;
+				input.spellcheck = false;
+				input.style.cssText = [
+					"width:100%",
+					"background:#121218",
+					"color:#eee",
+					"border:1px solid #33333e",
+					"border-radius:8px",
+					"padding:8px 10px",
+					"font-size:13px",
+					"outline:none",
+					"box-sizing:border-box"
+				].join(";");
+				panel.append(l, input);
+				return input;
+			};
+			const modelInput = field("模型", config.model, "qwen2.5vl:3b 或 glm-4v-flash");
+			const baseURLInput = field("Base URL", config.baseURL, "http://127.0.0.1:11434/v1");
+			const apiKeyInput = field("API Key（远程模型需要，本地 Ollama 留空）", config.apiKey, "粘贴智谱/其他 API Key", "password");
+			const buttons = document.createElement("div");
+			buttons.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:18px;";
+			const btn = (text, primary) => {
+				const b = document.createElement("button");
+				b.textContent = text;
+				b.style.cssText = [
+					"border:none",
+					"border-radius:8px",
+					"padding:8px 16px",
+					"cursor:pointer",
+					"font-size:13px",
+					primary ? "background:#4a6cf7;color:#fff;" : "background:transparent;color:#a8a8b2;border:1px solid #33333e;"
+				].join(";");
+				buttons.append(b);
+				return b;
+			};
+			const save = btn("保存", true);
+			const cancel = btn("取消", false);
+			const close = () => overlay.remove();
+			save.addEventListener("click", () => {
+				const next = {
+					...config,
+					model: modelInput.value.trim() || config.model,
+					baseURL: baseURLInput.value.trim() || config.baseURL,
+					apiKey: apiKeyInput.value.trim()
+				};
+				try {
+					window.localStorage.setItem(CONFIG_KEY, JSON.stringify(next));
+				} catch {}
+				updateStatusIndicator(next.apiKey !== "" ? "online" : "online", void 0, openVisionSettings);
+				close();
+				showUploadChip("已保存识图配置，刷新页面后完全生效");
+			});
+			cancel.addEventListener("click", close);
+			panel.append(title, modeLine, buttons);
+			overlay.append(panel);
+			document.body.appendChild(overlay);
+		}
+		/**
 		* Update (or create) the status pill. It shows readiness (就绪/不可用/关闭)
-		* and doubles as the bridge switch. During recognition the pill keeps saying
-		* "识图就绪" — the live "识别中 Xs" feedback lives on the thumbnail overlay.
+		* and opens the settings dialog on click. During recognition the pill keeps
+		* saying "识图就绪" — the live "识别中 Xs" feedback lives on the thumbnail
+		* overlay.
 		* @param state - the state to show.
 		* @param detail - optional detail text.
-		* @param onToggle - callback for a click (toggle the bridge).
+		* @param onToggle - unused; kept for call-site compatibility.
 		*/
 		function updateStatusIndicator(state, detail, onToggle) {
 			let el = document.getElementById("dsh-vision-indicator");
 			if (el === null) {
 				el = document.createElement("button");
 				el.id = "dsh-vision-indicator";
-				el.title = "点击开启/关闭本地识图";
+				el.title = "点击打开识图设置";
 				el.style.cssText = [
 					"border:1px solid rgba(128,128,128,.35)",
 					"background:rgba(28,28,32,.85)",
@@ -322,7 +438,7 @@ window.__ModuleLoader__.load({
 				const created = el;
 				el.addEventListener("click", () => {
 					if (created.dataset.busy === "1") return;
-					onToggle();
+					openVisionSettings();
 				});
 			}
 			if (state === "busy") {

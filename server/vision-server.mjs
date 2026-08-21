@@ -411,6 +411,14 @@ export function apply(ctx, config) {
         ? parsed.question.trim()
         : undefined
       const activeModel = typeof parsed.model === 'string' && parsed.model.length > 0 ? parsed.model : model
+      // Per-request endpoint overrides: the browser plugin sends the user's
+      // configured baseURL/apiKey (editable in the settings dialog) so a
+      // remote provider can be used without touching this server's patch.
+      const activeBaseURL = typeof parsed.baseURL === 'string' && parsed.baseURL.length > 0
+        ? parsed.baseURL
+        : baseURL
+      const activeApiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey : apiKey
+      const activeRemote = activeApiKey !== ''
       const useOcr = (parsed.ocrEnabled ?? ocrEnabled) && ocrModel !== ''
       const recognitionTimeout = recognitionTimeoutMs(parsed.timeoutMs, perImageTimeoutMs)
       const questionPrompt = question === undefined
@@ -461,7 +469,7 @@ export function apply(ctx, config) {
               try {
                 const downscaled = await downscale(buffer, mediaType, edge)
                 const dataUrl = `data:${downscaled.mediaType};base64,${downscaled.data.toString('base64')}`
-                scene = await chatCompletion(baseURL, activeModel, [
+                scene = await chatCompletion(activeBaseURL, activeModel, [
                   { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
                   {
                     role: 'user',
@@ -470,9 +478,9 @@ export function apply(ctx, config) {
                       { type: 'image_url', image_url: { url: dataUrl } },
                     ],
                   },
-                ], 1500, controller.signal, numCtx, apiKey)
+                ], 1500, controller.signal, numCtx, activeApiKey)
                 if (useOcr) {
-                  const raw = await chatCompletion(baseURL, ocrModel, [
+                  const raw = await chatCompletion(activeBaseURL, ocrModel, [
                     {
                       role: 'user',
                       content: [
@@ -480,7 +488,7 @@ export function apply(ctx, config) {
                         { type: 'image_url', image_url: { url: dataUrl } },
                       ],
                     },
-                  ], 2000, controller.signal, numCtx, apiKey)
+                  ], 2000, controller.signal, numCtx, activeApiKey)
                   const cleaned = cleanOcrText(raw)
                   text = cleaned.length > 0 ? cleaned : undefined
                 }
