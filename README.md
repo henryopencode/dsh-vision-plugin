@@ -9,21 +9,29 @@ English | [中文](README.zh.md)
 - Paste an image (`Ctrl/Cmd+V`) into the chat input → preview appears (native DSH UI)
 - On send, the image is recognized locally: **no cloud API, images never leave your machine**
 - The message shows **both the recognition result and the original image**
+- Paste a **file** (Word/PDF/…) into the chat → it is uploaded to the session
+  workspace and the file name rides along, so the agent can open it with its
+  file tools — no vision model needed for this half
 - Works with any chat model — even text-only ones like `deepseek-chat` — because the picture is converted to text before the model sees it
-- A status pill (top center of the page) shows online/offline/recognizing; click it to toggle
+- A status pill (top center of the page) shows online/offline/recognizing; click it to toggle. The pill is hidden while recognition is disabled
 
 ## Architecture
 
 ```
 paste image → browser plugin (ui-vision-bridge)
-  ├─ downscale to 1280px (20 MB → ~300 KB)
+  ├─ downscale to 2048px (20 MB → ~300 KB)
   ├─ same-origin POST /vision/recognize
   │     └─ server plugin (vision-server):
   │           ├─ sharp downscale (safety net)
   │           ├─ store original as attachment (shown in chat)
   │           ├─ recognize with local Ollama model (default qwen2.5vl:3b)
   │           └─ return text + attachment id
-  └─ message = user text + 【recognition result】 + ![原图](/vision/image/<id>)
+  └─ message = user text + [recognition result] + original image
+
+paste file (Word/PDF/…) → browser plugin
+  └─ same-origin POST /vision/upload { name, data, dir = session cwd }
+        └─ server plugin stores the file in the session workspace
+              └─ message = user text + [uploaded file] name
 ```
 
 Two components:
@@ -111,13 +119,15 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
   model: 'qwen3-vl:4b',        // more accurate on small text, slower
   ocrEnabled: true,            // enable DeepSeek-OCR text pass (needs: ollama pull deepseek-ocr)
   timeoutMs: 120000,
-  maxImageEdge: 1280,
+  maxImageEdge: 2048,
 }))
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Master switch (also toggle via the pill) |
+| `recognizeEnabled` | `true` | Image recognition (paste-image → vision model). Set `false` to disable; the pill then hides |
+| `uploadEnabled` | `true` | File upload (paste Word/PDF → session workspace) |
 | `baseURL` | `http://127.0.0.1:11434/v1` | Ollama endpoint |
 | `model` | `qwen2.5vl:3b` | Vision model |
 | `ocrModel` | `deepseek-ocr` | OCR model for precise text (`''` disables) |
@@ -131,6 +141,31 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 - `qwen2.5vl:3b` — fast (~15 s), light on RAM; occasionally makes up names
 - `qwen3-vl:4b` — accurate on dense small text (~30 s)
 - `deepseek-ocr` + vision model — dual engine: precise OCR text + scene description
+
+## Deploy recognition and upload separately
+
+The two features are fully independent — you can deploy just one of them:
+
+| Deploy only… | Server plugin | Browser config |
+|---|---|---|
+| **Recognition** | `server/vision-server.mjs` (needs Ollama + a vision model) | `recognizeEnabled: true, uploadEnabled: false` |
+| **File upload** | `server/upload-server.mjs` (**no Ollama, no sharp** — pure Node, ~4 KB) | `recognizeEnabled: false, uploadEnabled: true` |
+| Both | `server/vision-server.mjs` (it also hosts `/vision/upload` and `/vision/file`) | defaults |
+
+- `upload-server.mjs` imports only `node:fs/promises`, `node:path`, `node:os` —
+  zero external dependencies, so it runs on any machine with Node, with or
+  without Ollama.
+- Register the one you want in `cordis.patch.yml` under `~/.dsh/profiles/web/`
+  (Windows: `%USERPROFILE%\.dsh\profiles\web\`):
+  ```yaml
+  - insert:
+      - id: upload-server        # or: vision-server
+        name: ./upload-server.mjs
+        config:
+          maxBytes: 52428800
+  ```
+- With `recognizeEnabled: false` the status pill is hidden entirely — no
+  misleading "识图就绪" while recognition is off. File upload needs no pill.
 
 ## Performance: avoid "first recognition times out"
 
@@ -191,6 +226,7 @@ stays relevant until DeepSeek ships a vision-capable endpoint.
 | Nothing happens on paste | Embedded app WebView may not forward clipboard; use Chrome/Edge/Safari, or drag & drop the image |
 | `The operation timed out. (internal)` | App WebView network limits; use a real browser |
 | Recognition makes up names | Switch to `qwen3-vl:4b` |
+| Pill still shows 识图就绪 after disabling recognition | Set `recognizeEnabled: false` in `dsh-vision:config` and refresh — the pill hides entirely when recognition is off |
 
 ## Development
 
@@ -204,6 +240,34 @@ npx tsdown             # produces lib/client.js
 ```
 
 For DSH-repo integration (as a first-class plugin package), see `docs/dsh-integration.md`.
+
+## Mirrors: GitHub + Gitee
+
+This repository is dual-hosted and kept in sync by pushing to both remotes:
+
+- **GitHub** (primary): <https://github.com/henryopencode/dsh-vision-plugin>
+- **Gitee** (mirror, for users in mainland China): <https://gitee.com/henryopencodex/dsh-vision-plugin>
+
+Local setup keeps both remotes:
+
+```bash
+git remote add origin https://github.com/henryopencode/dsh-vision-plugin.git
+git remote add gitee   https://gitee.com/henryopencodex/dsh-vision-plugin.git
+```
+
+Publish a change to **both** in one command:
+
+```bash
+git push origin main
+git push gitee main
+```
+
+> Gitee occasionally rejects pushes that are ahead of its copy — push GitHub
+> first, then Gitee, and if Gitee complains run `git push gitee main` again
+> (or force-push only when you know the Gitee copy is stale).
+>
+> Gitee personal access tokens are stored in the remote URL. Prefer a
+> credential manager, or revoke and regenerate the token after use.
 
 ## License
 

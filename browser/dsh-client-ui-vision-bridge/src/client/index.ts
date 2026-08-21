@@ -403,6 +403,13 @@ function positionIndicator(el: HTMLElement): void {
  * @param onToggle - callback for a click (toggle the bridge).
  */
 function updateStatusIndicator(state: IndicatorState, detail: string | undefined, onToggle: () => void): void {
+  // Recognition disabled: the pill reports recognition readiness only, so
+  // hide it entirely (upload still works without it).
+  if (!readConfig().recognizeEnabled) {
+    const existing = document.getElementById('dsh-vision-indicator')
+    if (existing !== null) existing.remove()
+    return
+  }
   let el = document.getElementById('dsh-vision-indicator')
   if (el === null) {
     el = document.createElement('button')

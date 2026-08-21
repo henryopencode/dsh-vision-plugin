@@ -300,6 +300,11 @@ window.__ModuleLoader__.load({
 		* @param onToggle - callback for a click (toggle the bridge).
 		*/
 		function updateStatusIndicator(state, detail, onToggle) {
+			if (!readConfig().recognizeEnabled) {
+				const existing = document.getElementById("dsh-vision-indicator");
+				if (existing !== null) existing.remove();
+				return;
+			}
 			let el = document.getElementById("dsh-vision-indicator");
 			if (el === null) {
 				el = document.createElement("button");

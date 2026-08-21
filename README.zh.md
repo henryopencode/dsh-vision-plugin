@@ -9,21 +9,27 @@
 - 粘贴图片（`Ctrl/Cmd+V`）→ 输入框显示预览（DSH 原生 UI）
 - 发送后**本地识别**：无云端 API，图片不出机器
 - 消息中**同时显示识别结果和原图**
+- 粘贴**文件**（Word/PDF/…）→ 上传到会话工作区，文件名随消息发出，智能体可用文件工具打开（这一半**不需要**视觉模型）
 - 任何对话模型都可用——即使是 `deepseek-chat` 这类纯文本模型（图片在到达模型前已转为文字）
-- 页面顶部中央有状态胶囊：🟢 就绪 / 🔴 不可用 / ⏳ 识别中；点击可开关
+- 页面顶部中央有状态胶囊：🟢 就绪 / 🔴 不可用 / ⏳ 识别中；点击可开关。**关闭识图后胶囊自动隐藏**
 
 ## 架构
 
 ```
 粘贴图片 → 浏览器插件 (ui-vision-bridge)
-  ├─ 压缩到 1280px（20MB → ~300KB）
+  ├─ 压缩到 2048px（20MB → ~300KB）
   ├─ 同源 POST /vision/recognize
   │     └─ 服务端插件 (vision-server)：
   │           ├─ sharp 二次压缩（兜底）
   │           ├─ 保存原图为附件（对话回显）
   │           ├─ 调本地 Ollama 模型识别（默认 qwen2.5vl:3b）
   │           └─ 返回 文本 + 附件ID
-  └─ 消息 = 用户文字 + 【识别结果】+ ![原图](/vision/image/<id>)
+  └─ 消息 = 用户文字 + [识别结果] + 原图
+
+粘贴文件（Word/PDF/…）→ 浏览器插件
+  └─ 同源 POST /vision/upload { name, data, dir = 会话工作区 }
+        └─ 服务端插件把文件存进会话工作区
+              └─ 消息 = 用户文字 + [已上传文件] 文件名
 ```
 
 两部分组成：
@@ -109,13 +115,15 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
   model: 'qwen3-vl:4b',        // 小字更准，更慢
   ocrEnabled: true,            // 开启 DeepSeek-OCR 文字提取（需 ollama pull deepseek-ocr）
   timeoutMs: 120000,
-  maxImageEdge: 1280,
+  maxImageEdge: 2048,
 }))
 ```
 
 | 键 | 默认 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 总开关（也可点胶囊切换） |
+| `recognizeEnabled` | `true` | 图片识别（粘贴图片 → 视觉模型）。设为 `false` 关闭后胶囊自动隐藏 |
+| `uploadEnabled` | `true` | 文件上传（粘贴 Word/PDF → 会话工作区） |
 | `baseURL` | `http://127.0.0.1:11434/v1` | Ollama 地址 |
 | `model` | `qwen2.5vl:3b` | 识别模型 |
 | `ocrModel` | `deepseek-ocr` | OCR 模型（`''` 关闭） |
@@ -129,6 +137,27 @@ localStorage.setItem('dsh-vision:config', JSON.stringify({
 - `qwen2.5vl:3b` — 快（约 15 秒）、省内存；偶尔会编造名称
 - `qwen3-vl:4b` — 密集小字准确（约 30 秒）
 - `deepseek-ocr` + 视觉模型 — 双引擎：精确文字 + 场景描述
+
+## 识图与文件上传可单独部署
+
+两个功能完全独立——可以只部署其中任意一个：
+
+| 只部署… | 服务端插件 | 浏览器配置 |
+|---|---|---|
+| **识图** | `server/vision-server.mjs`（需要 Ollama + 视觉模型） | `recognizeEnabled: true, uploadEnabled: false` |
+| **文件上传** | `server/upload-server.mjs`（**不需要 Ollama、不需要 sharp**——纯 Node，约 4KB） | `recognizeEnabled: false, uploadEnabled: true` |
+| 两者都要 | `server/vision-server.mjs`（它同时托管 `/vision/upload` 与 `/vision/file`） | 默认值 |
+
+- `upload-server.mjs` 只依赖 `node:fs/promises`、`node:path`、`node:os`——零外部依赖，任何装 Node 的机器都能跑，有没有 Ollama 都行。
+- 在 `~/.dsh/profiles/web/cordis.patch.yml` 里只注册你需要的那一个（Windows：`%USERPROFILE%\.dsh\profiles\web\`）：
+  ```yaml
+  - insert:
+      - id: upload-server        # 或：vision-server
+        name: ./upload-server.mjs
+        config:
+          maxBytes: 52428800
+  ```
+- 设 `recognizeEnabled: false` 后状态胶囊**完全隐藏**——识图关闭时不再显示误导性的「识图就绪」。文件上传不需要胶囊。
 
 ## 性能优化：避免「第一次识别超时」
 
@@ -163,6 +192,7 @@ powershell -ExecutionPolicy Bypass -File scripts\warmup-ollama.ps1
 | 粘贴无反应 | 封装 App 的 WebView 可能不转发剪贴板；用 Chrome/Edge/Safari，或直接拖拽图片 |
 | `The operation timed out. (internal)` | App WebView 网络限制；请使用真实浏览器 |
 | 识别结果编造名称 | 换 `qwen3-vl:4b` |
+| 关闭识图后胶囊仍显示「识图就绪」 | 在 `dsh-vision:config` 里设 `recognizeEnabled: false` 并刷新页面——识图关闭后胶囊会完全隐藏 |
 
 ## 开发
 
@@ -176,6 +206,31 @@ npx tsdown             # 产出 lib/client.js
 ```
 
 与 DSH 仓库集成（作为一等插件包）见 `docs/dsh-integration.md`。
+
+## 镜像：GitHub + Gitee
+
+本仓库双平台托管，通过同时推送到两个远程保持同步：
+
+- **GitHub**（主仓库）：<https://github.com/henryopencode/dsh-vision-plugin>
+- **Gitee**（镜像，方便国内用户）：<https://gitee.com/henryopencodex/dsh-vision-plugin>
+
+本地同时配置两个远程：
+
+```bash
+git remote add origin https://github.com/henryopencode/dsh-vision-plugin.git
+git remote add gitee   https://gitee.com/henryopencodex/dsh-vision-plugin.git
+```
+
+一条命令把改动发到**两个平台**：
+
+```bash
+git push origin main
+git push gitee main
+```
+
+> Gitee 偶尔会拒绝落后于自身副本的推送——先推 GitHub 再推 Gitee；若 Gitee 报错，重试 `git push gitee main`（只有确认 Gitee 副本确实过期时才用强推）。
+>
+> Gitee 个人访问令牌会写进远程 URL。建议用凭据管理器，或使用后及时在 Gitee 后台吊销并重新生成令牌。
 
 ## License
 
