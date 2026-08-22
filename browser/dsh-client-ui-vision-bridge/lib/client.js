@@ -380,7 +380,7 @@ window.__ModuleLoader__.load({
 			keyLabel.textContent = "API Key";
 			keyLabel.style.cssText = "display:block;font-size:12px;color:var(--dsw-alias-label-secondary, #a8a8b2);margin:12px 0 4px;";
 			const apiKeyInput = document.createElement("input");
-			apiKeyInput.type = "password";
+			apiKeyInput.type = "text";
 			apiKeyInput.value = config.apiKey;
 			apiKeyInput.placeholder = "远程模型的 API Key（本地 Ollama 不需要）";
 			apiKeyInput.spellcheck = false;
@@ -422,7 +422,8 @@ window.__ModuleLoader__.load({
 						if (payload.apiKeySet === true) {
 							keyRow.style.display = "block";
 							modeLine.textContent = "当前：远程 API（Bearer 认证）";
-							apiKeyInput.placeholder = "服务器已配置 Key（留空则沿用服务器配置）";
+							if (typeof payload.apiKey === "string" && payload.apiKey.length > 0) apiKeyInput.value = payload.apiKey;
+							apiKeyInput.placeholder = "远程模型的 API Key";
 						}
 					} catch {}
 				})();

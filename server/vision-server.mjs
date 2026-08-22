@@ -239,16 +239,13 @@ export function apply(ctx, config) {
 
       // GET /vision/config — the server's effective recognition config, so
       // the browser settings dialog can show what actually runs (local
-      // Ollama vs remote provider). apiKey is masked (only last 4 shown).
+      // Ollama vs remote provider). apiKey is returned in full (user asked
+      // for it to be visible/editable in the dialog).
       if (url === '/vision/config' && req.method === 'GET') {
-        const maskKey = (key) => {
-          if (typeof key !== 'string' || key === '') return ''
-          return key.length <= 4 ? '****' : `****${key.slice(-4)}`
-        }
         respond(200, {
           model,
           baseURL,
-          apiKey: maskKey(apiKey),
+          apiKey,
           apiKeySet: typeof apiKey === 'string' && apiKey !== '',
           ocrEnabled,
         })
@@ -277,7 +274,9 @@ export function apply(ctx, config) {
           }
           if (typeof parsed?.model === 'string' && parsed.model.length > 0) probeModel = parsed.model
           if (typeof parsed?.baseURL === 'string' && parsed.baseURL.length > 0) probeBaseURL = parsed.baseURL
-          if (typeof parsed?.apiKey === 'string') probeApiKey = parsed.apiKey
+          // Empty/absent apiKey keeps the server's own key (the dialog may
+          // show a pre-configured server key without the user retyping it).
+          if (typeof parsed?.apiKey === 'string' && parsed.apiKey.length > 0) probeApiKey = parsed.apiKey
           probeRemote = probeApiKey !== ''
         }
         // A real end-to-end connectivity check: ask the configured model a
