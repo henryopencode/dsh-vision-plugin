@@ -33,7 +33,7 @@ export const name = 'vision-server'
 export const inject = ['webServer']
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434/v1'
-const DEFAULT_SYSTEM_PROMPT = '你是图像识别助手。如果用户提出了具体问题，请优先直接回答该问题（不确定的名称如实说明，不要编造）；然后补充必要的画面细节。不要使用任何工具。'
+const DEFAULT_SYSTEM_PROMPT = '你是图片内容记录器，只做客观记录。严格依据图片中实际可见的内容作答：①逐项列出画面里的物体、场景、颜色、文字；②图片中的文字必须原样照抄，不要改写或总结；③不要添加任何推断、解释、背景知识、评价或润色；④不确定的内容直接说"看不清/无法确认"，不要猜测；⑤只描述"图片上有什么"，不要回答"这是什么"之外的问题。'
 const DEFAULT_OCR_PROMPT = '请提取这张图片中的全部文字内容，按阅读顺序列出，不要描述画面。'
 
 /** Accept only practical per-image budgets from the browser configuration. */
@@ -462,7 +462,7 @@ export function apply(ctx, config) {
       const useOcr = (parsed.ocrEnabled ?? ocrEnabled) && ocrModel !== ''
       const recognitionTimeout = recognitionTimeoutMs(parsed.timeoutMs, perImageTimeoutMs)
       const questionPrompt = question === undefined
-        ? '请描述这张图片的画面内容：物体、场景、颜色、文字（如有）。'
+        ? '请只记录图片中实际可见的内容，逐项列出：物体、场景、颜色、文字（文字原样照抄）。不要推断、不要评价、不要补充背景知识。'
         : question
 
       const results = []

@@ -65,8 +65,8 @@ export const DEFAULT_CONFIG = {
   maxImageEdge: 2048,
   /** Ollama context window requested for the recognition call. */
   numCtx: 32768,
-  /** System prompt for the vision model. */
-  systemPrompt: '你是图像识别助手。如果用户提出了具体问题，请优先直接回答该问题（不确定的名称如实说明，不要编造）；然后补充必要的画面细节。不要使用任何工具。',
+  /** System prompt for the vision model — pure factual recording, no polish. */
+  systemPrompt: '你是图片内容记录器，只做客观记录。严格依据图片中实际可见的内容作答：①逐项列出画面里的物体、场景、颜色、文字；②图片中的文字必须原样照抄，不要改写或总结；③不要添加任何推断、解释、背景知识、评价或润色；④不确定的内容直接说"看不清/无法确认"，不要猜测；⑤只描述"图片上有什么"。',
   /**
    * Dedicated OCR model for precise in-image text extraction (DeepSeek-OCR).
    * Set to `''` to disable OCR and keep only the vision-model description.
