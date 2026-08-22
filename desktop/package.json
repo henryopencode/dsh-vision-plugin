@@ -1,0 +1,41 @@
+{
+  "name": "dsh-win7-client",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness desktop client for Windows 7 (Electron 22 / Chromium 108)",
+  "main": "main.js",
+  "author": "dsh-vision-plugin",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "appId": "com.dsh.win7client",
+    "productName": "DSH",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "DSH"
+    }
+  }
+}
