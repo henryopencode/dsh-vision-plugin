@@ -820,7 +820,8 @@ function renderLocalImageDraft(): void {
       renderLocalImageDraft()
     })
     // Recognition overlay: a translucent mask over the thumbnail while the
-    // image is being recognized, with a live seconds counter.
+    // image is being recognized. Content (counter + stop) is added by
+    // showThumbnailOverlay; no static text here so nothing lingers above it.
     const overlay = document.createElement('div')
     overlay.className = 'dsh-vision-thumb-overlay'
     overlay.style.cssText = [
@@ -829,7 +830,6 @@ function renderLocalImageDraft(): void {
       'color:#fff', 'font:11px/1.4 -apple-system,"PingFang SC",sans-serif',
       'text-align:center', 'padding:4px', 'pointer-events:none',
     ].join(';')
-    overlay.textContent = '识别中…'
     item.append(img, overlay, remove)
     bar.append(item)
   }

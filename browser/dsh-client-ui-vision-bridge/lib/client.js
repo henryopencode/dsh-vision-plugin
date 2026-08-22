@@ -726,7 +726,6 @@ window.__ModuleLoader__.load({
 					"padding:4px",
 					"pointer-events:none"
 				].join(";");
-				overlay.textContent = "识别中…";
 				item.append(img, overlay, remove);
 				bar.append(item);
 			}
