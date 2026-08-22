@@ -254,7 +254,10 @@ async function recognizeViaServer(
   question: string | undefined,
   onStage: ((stage: string) => void) | undefined,
 ): Promise<ServerRecognizeOutcome | undefined> {
-  const controller = new AbortController()
+  // The user can cancel an in-flight recognition via the ⏹ button on the
+  // thumbnail overlay; aborting this controller rejects the fetch below.
+  recognitionAbort = new AbortController()
+  const controller = recognitionAbort
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     // Downscale in the browser before upload. A WebView can time out while
@@ -440,10 +443,13 @@ function openVisionSettings(): void {
 
   const panel = document.createElement('div')
   panel.style.cssText = [
-    'width:420px', 'max-width:90vw', 'background:#1a1a20',
-    'border:1px solid #33333e', 'border-radius:14px', 'padding:20px',
+    'width:420px', 'max-width:90vw',
+    'background:var(--dsw-alias-bg-module-platform, #1a1a20)',
+    'border:1px solid var(--dsw-alias-border-l2-darkmode-thin, #33333e)',
+    'border-radius:14px', 'padding:20px',
     'box-shadow:0 12px 40px rgba(0,0,0,.5)',
-    'font:13px/1.6 -apple-system,"PingFang SC",sans-serif', 'color:#e8e8ec',
+    'font:13px/1.6 -apple-system,"PingFang SC",sans-serif',
+    'color:var(--dsw-alias-label-primary, #e8e8ec)',
   ].join(';')
 
   const title = document.createElement('h3')
@@ -465,14 +471,14 @@ function openVisionSettings(): void {
   const field = (label: string, value: string, placeholder: string, type = 'text'): HTMLInputElement => {
     const l = document.createElement('label')
     l.textContent = label
-    l.style.cssText = 'display:block;font-size:12px;color:#a8a8b2;margin:12px 0 4px;'
+    l.style.cssText = 'display:block;font-size:12px;color:var(--dsw-alias-label-secondary, #a8a8b2);margin:12px 0 4px;'
     const input = document.createElement('input')
     input.type = type
     input.value = value
     input.placeholder = placeholder
     input.spellcheck = false
     input.style.cssText = [
-      'width:100%', 'background:#121218', 'color:#eee', 'border:1px solid #33333e',
+      'width:100%', 'background:var(--dsw-alias-bg-base, #121218)', 'color:var(--dsw-alias-label-primary, #eee)', 'border:1px solid var(--dsw-alias-border-l2-darkmode-thin, #33333e)',
       'border-radius:8px', 'padding:8px 10px', 'font-size:13px', 'outline:none',
       'box-sizing:border-box',
     ].join(';')
@@ -486,14 +492,14 @@ function openVisionSettings(): void {
   // API key row: only meaningful for remote providers, hidden for local URLs.
   const keyLabel = document.createElement('label')
   keyLabel.textContent = 'API Key'
-  keyLabel.style.cssText = 'display:block;font-size:12px;color:#a8a8b2;margin:12px 0 4px;'
+  keyLabel.style.cssText = 'display:block;font-size:12px;color:var(--dsw-alias-label-secondary, #a8a8b2);margin:12px 0 4px;'
   const apiKeyInput = document.createElement('input')
   apiKeyInput.type = 'password'
   apiKeyInput.value = config.apiKey
   apiKeyInput.placeholder = '远程模型的 API Key（本地 Ollama 不需要）'
   apiKeyInput.spellcheck = false
   apiKeyInput.style.cssText = [
-    'width:100%', 'background:#121218', 'color:#eee', 'border:1px solid #33333e',
+    'width:100%', 'background:var(--dsw-alias-bg-base, #121218)', 'color:var(--dsw-alias-label-primary, #eee)', 'border:1px solid var(--dsw-alias-border-l2-darkmode-thin, #33333e)',
     'border-radius:8px', 'padding:8px 10px', 'font-size:13px', 'outline:none',
     'box-sizing:border-box',
   ].join(';')
@@ -653,8 +659,9 @@ function updateStatusIndicator(state: IndicatorState, detail: string | undefined
     el.id = 'dsh-vision-indicator'
     el.title = '点击打开识图设置'
     el.style.cssText = [
-      'border:1px solid rgba(128,128,128,.35)',
-      'background:rgba(28,28,32,.85)', 'color:#ddd', 'cursor:pointer',
+      'border:1px solid var(--dsw-alias-border-l2-darkmode-thin, rgba(128,128,128,.35))',
+      'background:var(--dsw-alias-bg-module-platform, rgba(28,28,32,.85))',
+      'color:var(--dsw-alias-label-primary, #ddd)', 'cursor:pointer',
       'padding:0 12px', 'border-radius:999px', 'height:30px',
       'box-sizing:border-box',
       'font:12px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif',
@@ -834,9 +841,13 @@ function renderLocalImageDraft(): void {
   }
 }
 
+/** Live abort handle for the in-flight recognition; set while running. */
+let recognitionAbort: AbortController | null = null
+
 /**
- * Show a live "识别中 Xs" mask over every pending image thumbnail. Called
- * when recognition starts; the thumbnails are kept on screen until it ends.
+ * Show a live "识别中 Xs" mask over every pending image thumbnail, with a
+ * ⏹ stop button that aborts the in-flight recognition. Called when
+ * recognition starts; the thumbnails are kept on screen until it ends.
  */
 function showThumbnailOverlay(): void {
   const startedAt = Date.now()
@@ -846,25 +857,39 @@ function showThumbnailOverlay(): void {
     for (const el of items) {
       if (el instanceof HTMLElement) {
         el.style.display = 'flex'
+        el.style.flexDirection = 'column'
         el.textContent = `识别中 ${sec}s`
       }
     }
   }
   tick()
   const timer = window.setInterval(tick, 1000)
-  window.setTimeout(() => {
-    // Give the interval a bounded life; cleared earlier on completion.
-  }, 0)
   document.documentElement.dataset.visionThumbTimer = String(timer)
+  // A stop control on the first overlay aborts the running recognition.
+  const first = items[0]
+  if (first instanceof HTMLElement) {
+    const stop = document.createElement('button')
+    stop.textContent = '⏹ 停止'
+    stop.style.cssText = [
+      'margin-top:4px', 'border:none', 'border-radius:6px', 'padding:2px 8px',
+      'background:rgba(248,113,113,.85)', 'color:#fff', 'cursor:pointer',
+      'font:11px/1.4 -apple-system,"PingFang SC",sans-serif',
+    ].join(';')
+    stop.addEventListener('click', () => {
+      recognitionAbort?.abort()
+    })
+    first.append(stop)
+  }
 }
 
-/** Hide thumbnail overlays and clear the live timer. */
+/** Hide thumbnail overlays, clear the live timer and the abort handle. */
 function hideThumbnailOverlay(): void {
   const timer = Number(document.documentElement.dataset.visionThumbTimer)
   if (Number.isFinite(timer) && timer > 0) {
     window.clearInterval(timer)
     delete document.documentElement.dataset.visionThumbTimer
   }
+  recognitionAbort = null
   for (const el of document.querySelectorAll('.dsh-vision-thumb-overlay')) {
     if (el instanceof HTMLElement) el.style.display = 'none'
   }
@@ -1340,12 +1365,17 @@ export function apply(ctx: ClientContext): void {
       // Pill stays "识图就绪" — no status change on completion.
       updateStatusIndicator('online', undefined, toggleBridge)
     } else {
-      // Recognition failed (remote rate limit, service down, timeout…). The
-      // message still goes out with a notice — the user's flow is never
-      // blocked, they just see the picture was not recognized.
-      recognized.push(
-        `⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`,
-      )
+      if (recognitionAbort?.signal.aborted === true) {
+        // User pressed ⏹ 停止: don't claim a failure, just note it.
+        recognized.push(`⏹ 已停止识别（${elapsedSec} 秒）。图片未发送，可重新粘贴图片识别。`)
+      } else {
+        // Recognition failed (remote rate limit, service down, timeout…). The
+        // message still goes out with a notice — the user's flow is never
+        // blocked, they just see the picture was not recognized.
+        recognized.push(
+          `⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`,
+        )
+      }
       updateStatusIndicator('offline', undefined, toggleBridge)
     }
 
@@ -1423,8 +1453,10 @@ export function apply(ctx: ClientContext): void {
     addButton.title = '添加文件或图片'
     addButton.style.cssText = [
       'width:30px', 'height:30px', 'flex:none', 'border-radius:8px',
-      'border:1px solid rgba(128,128,128,.4)', 'box-sizing:border-box',
-      'background:rgba(28,28,32,.85)', 'color:#ddd', 'cursor:pointer',
+      'border:1px solid var(--dsw-alias-border-l2-darkmode-thin, rgba(128,128,128,.4))',
+      'box-sizing:border-box',
+      'background:var(--dsw-alias-bg-module-platform, rgba(28,28,32,.85))',
+      'color:var(--dsw-alias-label-primary, #ddd)', 'cursor:pointer',
       'font:14px/1 sans-serif', 'display:inline-flex', 'align-items:center',
       'justify-content:center', 'padding:0', 'margin:auto 0',
     ].join(';')
@@ -1450,7 +1482,7 @@ export function apply(ctx: ClientContext): void {
           'gap:6px', 'flex-wrap:nowrap',
           'padding:10px 12px', 'min-height:30px',
           'margin-top:-10px', 'margin-bottom:-12px',
-          'border-bottom:1px solid rgba(128,128,128,.15)',
+          'border-bottom:1px solid var(--dsw-alias-border-l2-darkmode-thin, rgba(128,128,128,.15))',
           'min-width:0', 'overflow:visible', 'box-sizing:border-box',
         ].join(';')
         composer.insertBefore(rail, composer.firstChild)

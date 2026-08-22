@@ -170,7 +170,8 @@ window.__ModuleLoader__.load({
 		* @returns per-image results, or undefined when the endpoint is missing.
 		*/
 		async function recognizeViaServer(originalFetch, config, images, question, onStage) {
-			const controller = new AbortController();
+			recognitionAbort = new AbortController();
+			const controller = recognitionAbort;
 			let timer;
 			try {
 				const prepared = [];
@@ -334,13 +335,13 @@ window.__ModuleLoader__.load({
 			panel.style.cssText = [
 				"width:420px",
 				"max-width:90vw",
-				"background:#1a1a20",
-				"border:1px solid #33333e",
+				"background:var(--dsw-alias-bg-module-platform, #1a1a20)",
+				"border:1px solid var(--dsw-alias-border-l2-darkmode-thin, #33333e)",
 				"border-radius:14px",
 				"padding:20px",
 				"box-shadow:0 12px 40px rgba(0,0,0,.5)",
 				"font:13px/1.6 -apple-system,\"PingFang SC\",sans-serif",
-				"color:#e8e8ec"
+				"color:var(--dsw-alias-label-primary, #e8e8ec)"
 			].join(";");
 			const title = document.createElement("h3");
 			title.textContent = "识图设置";
@@ -353,7 +354,7 @@ window.__ModuleLoader__.load({
 			const field = (label, value, placeholder, type = "text") => {
 				const l = document.createElement("label");
 				l.textContent = label;
-				l.style.cssText = "display:block;font-size:12px;color:#a8a8b2;margin:12px 0 4px;";
+				l.style.cssText = "display:block;font-size:12px;color:var(--dsw-alias-label-secondary, #a8a8b2);margin:12px 0 4px;";
 				const input = document.createElement("input");
 				input.type = type;
 				input.value = value;
@@ -361,9 +362,9 @@ window.__ModuleLoader__.load({
 				input.spellcheck = false;
 				input.style.cssText = [
 					"width:100%",
-					"background:#121218",
-					"color:#eee",
-					"border:1px solid #33333e",
+					"background:var(--dsw-alias-bg-base, #121218)",
+					"color:var(--dsw-alias-label-primary, #eee)",
+					"border:1px solid var(--dsw-alias-border-l2-darkmode-thin, #33333e)",
 					"border-radius:8px",
 					"padding:8px 10px",
 					"font-size:13px",
@@ -377,7 +378,7 @@ window.__ModuleLoader__.load({
 			const baseURLInput = field("Base URL", config.baseURL, "http://127.0.0.1:11434/v1");
 			const keyLabel = document.createElement("label");
 			keyLabel.textContent = "API Key";
-			keyLabel.style.cssText = "display:block;font-size:12px;color:#a8a8b2;margin:12px 0 4px;";
+			keyLabel.style.cssText = "display:block;font-size:12px;color:var(--dsw-alias-label-secondary, #a8a8b2);margin:12px 0 4px;";
 			const apiKeyInput = document.createElement("input");
 			apiKeyInput.type = "password";
 			apiKeyInput.value = config.apiKey;
@@ -385,9 +386,9 @@ window.__ModuleLoader__.load({
 			apiKeyInput.spellcheck = false;
 			apiKeyInput.style.cssText = [
 				"width:100%",
-				"background:#121218",
-				"color:#eee",
-				"border:1px solid #33333e",
+				"background:var(--dsw-alias-bg-base, #121218)",
+				"color:var(--dsw-alias-label-primary, #eee)",
+				"border:1px solid var(--dsw-alias-border-l2-darkmode-thin, #33333e)",
 				"border-radius:8px",
 				"padding:8px 10px",
 				"font-size:13px",
@@ -526,9 +527,9 @@ window.__ModuleLoader__.load({
 				el.id = "dsh-vision-indicator";
 				el.title = "点击打开识图设置";
 				el.style.cssText = [
-					"border:1px solid rgba(128,128,128,.35)",
-					"background:rgba(28,28,32,.85)",
-					"color:#ddd",
+					"border:1px solid var(--dsw-alias-border-l2-darkmode-thin, rgba(128,128,128,.35))",
+					"background:var(--dsw-alias-bg-module-platform, rgba(28,28,32,.85))",
+					"color:var(--dsw-alias-label-primary, #ddd)",
 					"cursor:pointer",
 					"padding:0 12px",
 					"border-radius:999px",
@@ -733,9 +734,12 @@ window.__ModuleLoader__.load({
 			if (composer !== null && composer.firstChild !== null) composer.insertBefore(bar, composer.firstChild);
 			else document.body.appendChild(bar);
 		}
+		/** Live abort handle for the in-flight recognition; set while running. */
+		let recognitionAbort = null;
 		/**
-		* Show a live "识别中 Xs" mask over every pending image thumbnail. Called
-		* when recognition starts; the thumbnails are kept on screen until it ends.
+		* Show a live "识别中 Xs" mask over every pending image thumbnail, with a
+		* ⏹ stop button that aborts the in-flight recognition. Called when
+		* recognition starts; the thumbnails are kept on screen until it ends.
 		*/
 		function showThumbnailOverlay() {
 			const startedAt = Date.now();
@@ -744,21 +748,41 @@ window.__ModuleLoader__.load({
 				const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1e3));
 				for (const el of items) if (el instanceof HTMLElement) {
 					el.style.display = "flex";
+					el.style.flexDirection = "column";
 					el.textContent = `识别中 ${sec}s`;
 				}
 			};
 			tick();
 			const timer = window.setInterval(tick, 1e3);
-			window.setTimeout(() => {}, 0);
 			document.documentElement.dataset.visionThumbTimer = String(timer);
+			const first = items[0];
+			if (first instanceof HTMLElement) {
+				const stop = document.createElement("button");
+				stop.textContent = "⏹ 停止";
+				stop.style.cssText = [
+					"margin-top:4px",
+					"border:none",
+					"border-radius:6px",
+					"padding:2px 8px",
+					"background:rgba(248,113,113,.85)",
+					"color:#fff",
+					"cursor:pointer",
+					"font:11px/1.4 -apple-system,\"PingFang SC\",sans-serif"
+				].join(";");
+				stop.addEventListener("click", () => {
+					recognitionAbort?.abort();
+				});
+				first.append(stop);
+			}
 		}
-		/** Hide thumbnail overlays and clear the live timer. */
+		/** Hide thumbnail overlays, clear the live timer and the abort handle. */
 		function hideThumbnailOverlay() {
 			const timer = Number(document.documentElement.dataset.visionThumbTimer);
 			if (Number.isFinite(timer) && timer > 0) {
 				window.clearInterval(timer);
 				delete document.documentElement.dataset.visionThumbTimer;
 			}
+			recognitionAbort = null;
 			for (const el of document.querySelectorAll(".dsh-vision-thumb-overlay")) if (el instanceof HTMLElement) el.style.display = "none";
 		}
 		/**
@@ -1155,7 +1179,8 @@ window.__ModuleLoader__.load({
 					if (images.length > config.maxImages) recognized.push(`⚠️ 另有 ${images.length - config.maxImages} 张图片未识别（单条消息最多识别 ${config.maxImages} 张）`);
 					updateStatusIndicator("online", void 0, toggleBridge);
 				} else {
-					recognized.push(`⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`);
+					if (recognitionAbort?.signal.aborted === true) recognized.push(`⏹ 已停止识别（${elapsedSec} 秒）。图片未发送，可重新粘贴图片识别。`);
+					else recognized.push(`⚠️ 识图服务暂时不可用（${elapsedSec} 秒内未响应，可能被限流）。图片未识别，请稍后重试。`);
 					updateStatusIndicator("offline", void 0, toggleBridge);
 				}
 				hideThumbnailOverlay();
@@ -1226,10 +1251,10 @@ window.__ModuleLoader__.load({
 					"height:30px",
 					"flex:none",
 					"border-radius:8px",
-					"border:1px solid rgba(128,128,128,.4)",
+					"border:1px solid var(--dsw-alias-border-l2-darkmode-thin, rgba(128,128,128,.4))",
 					"box-sizing:border-box",
-					"background:rgba(28,28,32,.85)",
-					"color:#ddd",
+					"background:var(--dsw-alias-bg-module-platform, rgba(28,28,32,.85))",
+					"color:var(--dsw-alias-label-primary, #ddd)",
 					"cursor:pointer",
 					"font:14px/1 sans-serif",
 					"display:inline-flex",
@@ -1260,7 +1285,7 @@ window.__ModuleLoader__.load({
 							"min-height:30px",
 							"margin-top:-10px",
 							"margin-bottom:-12px",
-							"border-bottom:1px solid rgba(128,128,128,.15)",
+							"border-bottom:1px solid var(--dsw-alias-border-l2-darkmode-thin, rgba(128,128,128,.15))",
 							"min-width:0",
 							"overflow:visible",
 							"box-sizing:border-box"
