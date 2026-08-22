@@ -846,19 +846,23 @@ let recognitionAbort: AbortController | null = null
 
 /**
  * Show a live "识别中 Xs" mask over every pending image thumbnail, with a
- * ⏹ stop button that aborts the in-flight recognition. Called when
- * recognition starts; the thumbnails are kept on screen until it ends.
+ * ⏹ stop button that aborts the in-flight recognition. The seconds counter
+ * lives in its own span so the stop button is never wiped by text updates.
+ * Called when recognition starts; the thumbnails are kept until it ends.
  */
 function showThumbnailOverlay(): void {
   const startedAt = Date.now()
   const items = Array.from(document.querySelectorAll('.dsh-vision-thumb-overlay'))
+  const counter = document.createElement('span')
+  counter.className = 'dsh-vision-thumb-counter'
+  counter.style.cssText = 'display:block;line-height:1.3;'
   const tick = (): void => {
     const sec = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+    counter.textContent = `识别中 ${sec}s`
     for (const el of items) {
       if (el instanceof HTMLElement) {
         el.style.display = 'flex'
         el.style.flexDirection = 'column'
-        el.textContent = `识别中 ${sec}s`
       }
     }
   }
@@ -878,7 +882,7 @@ function showThumbnailOverlay(): void {
     stop.addEventListener('click', () => {
       recognitionAbort?.abort()
     })
-    first.append(stop)
+    first.append(counter, stop)
   }
 }
 
