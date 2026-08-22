@@ -1503,6 +1503,13 @@ export function apply(ctx: ClientContext): void {
       document.querySelectorAll('#dsh-vision-attach-button').forEach(el => {
         if (el !== addButton) el.remove()
       })
+      // New sessions re-render the composer and drop our pill along with the
+      // rail; recreate it here (recognizeEnabled on) so it survives switches.
+      const cfg = readConfig()
+      if (cfg.enabled && cfg.recognizeEnabled
+        && document.getElementById('dsh-vision-indicator') === null) {
+        updateStatusIndicator('online', undefined, openVisionSettings)
+      }
       const rail = ensureRail()
       if (rail === null) {
         if (addButton.parentElement !== document.body) document.body.appendChild(addButton)

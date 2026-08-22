@@ -1302,6 +1302,8 @@ window.__ModuleLoader__.load({
 					document.querySelectorAll("#dsh-vision-attach-button").forEach((el) => {
 						if (el !== addButton) el.remove();
 					});
+					const cfg = readConfig();
+					if (cfg.enabled && cfg.recognizeEnabled && document.getElementById("dsh-vision-indicator") === null) updateStatusIndicator("online", void 0, openVisionSettings);
 					const rail = ensureRail();
 					if (rail === null) {
 						if (addButton.parentElement !== document.body) document.body.appendChild(addButton);
